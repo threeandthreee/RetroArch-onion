@@ -294,7 +294,6 @@ extern const struct softfilter_implementation *upscale_1_5x_get_implementation(s
 extern const struct softfilter_implementation *upscale_256x_320x240_get_implementation(softfilter_simd_mask_t simd);
 extern const struct softfilter_implementation *picoscale_256x_320x240_get_implementation(softfilter_simd_mask_t simd);
 extern const struct softfilter_implementation *upscale_240x160_320x240_get_implementation(softfilter_simd_mask_t simd);
-extern const struct softfilter_implementation *upscale_mix_240x160_320x240_get_implementation(softfilter_simd_mask_t simd);
 
 static const softfilter_get_implementation_t soft_plugs_builtin[] = {
    blargg_ntsc_snes_get_implementation,
@@ -322,7 +321,6 @@ static const softfilter_get_implementation_t soft_plugs_builtin[] = {
    upscale_256x_320x240_get_implementation,
    picoscale_256x_320x240_get_implementation,
    upscale_240x160_320x240_get_implementation,
-   upscale_mix_240x160_320x240_get_implementation,
 };
 
 static bool append_softfilter_plugs(rarch_softfilter_t *filt,
@@ -347,16 +345,19 @@ static bool append_softfilter_plugs(rarch_softfilter_t *filt,
       if (!filt->plugs[i].impl)
          return false;
    }
-
+ #if !defined(HAVE_DYLIB)
    return true;
 }
-#elif defined(HAVE_DYLIB)
+ #endif
+#endif
+#if defined(HAVE_DYLIB)
+ #if !defined(HAVE_FILTERS_BUILTIN)
 static bool append_softfilter_plugs(rarch_softfilter_t *filt,
       struct string_list *list)
 {
    unsigned i;
    softfilter_simd_mask_t mask = (softfilter_simd_mask_t)cpu_features_get();
-
+ #endif
    for (i = 0; i < list->size; i++)
    {
       softfilter_get_implementation_t cb;
@@ -409,7 +410,7 @@ static bool append_softfilter_plugs(rarch_softfilter_t *filt,
 
    return true;
 }
-#else
+#elif !defined(HAVE_FILTERS_BUILTIN)
 static bool append_softfilter_plugs(rarch_softfilter_t *filt,
       struct string_list *list)
 {
@@ -509,6 +510,8 @@ void rarch_softfilter_free(rarch_softfilter_t *filt)
    {
       for (i = 0; i < filt->threads; i++)
       {
+         if (!&filt->thread_data[i])
+            continue;
          if (!filt->thread_data[i].thread)
             continue;
          slock_lock(filt->thread_data[i].lock);

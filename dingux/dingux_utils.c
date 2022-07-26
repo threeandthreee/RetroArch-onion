@@ -22,7 +22,10 @@
 #if defined(RS90)
 #include <lists/dir_list.h>
 #endif
-
+#if defined(MIYOOMINI)
+#include "sys/ioctl.h"
+#include <fcntl.h>
+#endif
 #include <stdlib.h>
 
 #include "dingux_utils.h"
@@ -52,9 +55,6 @@
 
 /* Miyoo defines */
 #define MIYOO_BATTERY_VOLTAGE_NOW_FILE    "/sys/class/power_supply/miyoo-battery/voltage_now"
-
-/* RetroFW */
-#define RETROFW_BATTERY_VOLTAGE_NOW_FILE "/proc/jz/battery"
 
 /* Enables/disables downscaling when using
  * the IPU hardware scaler */
@@ -252,64 +252,6 @@ bool dingux_ipu_reset(void)
 #endif
 }
 
-#if defined(RETROFW)
-static uint64_t read_battery_ignore_size(const char *path)
-{
-   int64_t file_len   = 0;
-   char file_buf[20];
-   int sys_file_value = 0;
-   RFILE *file;
-
-   /* Check whether file exists */
-   if (!path_is_valid(path))
-      return -1;
-
-   memset(file_buf, 0, sizeof(file_buf));
-
-   file              = filestream_open(path,
-         RETRO_VFS_FILE_ACCESS_READ,
-         RETRO_VFS_FILE_ACCESS_HINT_NONE);
-
-   if (!file)
-   {
-      return -1;
-   }
-
-   file_len = filestream_read(file, file_buf, sizeof(file_buf) - 1);
-   if (filestream_close(file) != 0)
-      if (file)
-         free(file);
-
-   if (file_len <= 0)
-      return -1;
-
-   return strtoul(file_buf, NULL, 10);
-}
-
-int retrofw_get_battery_level(enum frontend_powerstate *state)
-{
-   /* retrofw battery only provides "voltage_now". Values are based on gmenu2x with some interpolation */
-   uint32_t rawval = read_battery_ignore_size(RETROFW_BATTERY_VOLTAGE_NOW_FILE);
-   int voltage_now = rawval & 0x7fffffff;
-   if (voltage_now > 10000) {
-      *state = FRONTEND_POWERSTATE_NONE;
-      return -1;
-   }
-   if (rawval & 0x80000000) {
-      *state = FRONTEND_POWERSTATE_CHARGING;
-      if (voltage_now > 4000)
-	 *state = FRONTEND_POWERSTATE_CHARGED;
-   } else
-      *state = FRONTEND_POWERSTATE_ON_POWER_SOURCE;
-   if (voltage_now < 0) return -1;     // voltage_now not available
-   if (voltage_now > 4000) return 100;
-   if (voltage_now > 3700) return 40 + (voltage_now - 3700) / 5;
-   if (voltage_now > 3520) return 20 + (voltage_now - 3520) / 9;
-   if (voltage_now > 3330) return 1 + (voltage_now - 3330) * 10;
-   return 0;
-}
-#else
-
 static int dingux_read_battery_sys_file(const char *path)
 {
    int64_t file_len   = 0;
@@ -372,6 +314,36 @@ int dingux_get_battery_level(void)
       return -1;
 
    return (int)(((voltage_now - voltage_min) * 100) / (voltage_max - voltage_min));
+#elif defined(MIYOOMINI)
+   typedef struct {
+      int channel_value;
+      int adc_value;
+   } SAR_ADC_CONFIG_READ;
+   #define SARADC_IOC_MAGIC                     'a'
+   #define IOCTL_SAR_INIT                       _IO(SARADC_IOC_MAGIC, 0)
+   #define IOCTL_SAR_SET_CHANNEL_READ_VALUE     _IO(SARADC_IOC_MAGIC, 1)
+   static SAR_ADC_CONFIG_READ  adcCfg = {0,0};
+   static int sar_fd = 0;
+   if (!sar_fd) {
+      sar_fd = open("/dev/sar", O_WRONLY);
+      ioctl(sar_fd, IOCTL_SAR_INIT, NULL);
+   }
+   ioctl(sar_fd, IOCTL_SAR_SET_CHANNEL_READ_VALUE, &adcCfg);
+
+   int percBat = 0;
+   if (adcCfg.adc_value >= 528){
+      percBat = adcCfg.adc_value-478;
+   }
+   else if ((adcCfg.adc_value >= 512) && (adcCfg.adc_value < 528)){
+      percBat = (int)(adcCfg.adc_value*2.125-1068);
+   }
+   else if ((adcCfg.adc_value >= 480) && (adcCfg.adc_value < 512)){
+      percBat = (int)(adcCfg.adc_value* 0.51613 - 243.742);
+   }
+   if (percBat>100){
+      percBat=100;
+   }
+   return  percBat;
 #elif defined(MIYOO)
    /* miyoo-battery only provides "voltage_now". Results are based on
     * value distribution while running a game at max load. */
@@ -394,7 +366,6 @@ int dingux_get_battery_level(void)
    return dingux_read_battery_sys_file(DINGUX_BATTERY_CAPACITY_FILE);
 #endif
 }
-#endif
 
 /* Fetches the path of the base 'retroarch'
  * directory */
