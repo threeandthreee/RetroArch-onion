@@ -7,8 +7,8 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <SDL/SDL.h>
-#include <sdkdir/mi_sys.h>
-#include <sdkdir/mi_gfx.h>
+#include <mi_sys.h>
+#include <mi_gfx.h>
 
 #define	pixelsPa	unused1
 #define ALIGN4K(val)	((val+4095)&(~4095))

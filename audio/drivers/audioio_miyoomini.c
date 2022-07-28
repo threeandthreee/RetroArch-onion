@@ -28,7 +28,7 @@
 
 #define YIELD_WAIT /* Flag to wait with sched_yield() when the wait time is less than 10ms */
 
-#include <sdkdir/mi_ao.h>
+#include <mi_ao.h>
 #ifdef	YIELD_WAIT
 #include <sched.h>
 #ifndef	SCHED_IDLE

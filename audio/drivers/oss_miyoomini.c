@@ -34,7 +34,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/soundcard.h>
-#include <sdkdir/mi_ao.h>
+#include <mi_ao.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
