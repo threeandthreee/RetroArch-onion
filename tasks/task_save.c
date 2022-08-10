@@ -1031,10 +1031,11 @@ static void task_load_handler(retro_task_t *task)
 
          msg[0]            = '\0';
 
-         if (state->autoload)
-            snprintf(msg, msg_size - 1,
-                  msg_hash_to_str(MSG_AUTOLOADING_SAVESTATE_SUCCEEDED),
-                  state->path);
+         if (state->autoload) { // Hiding "Auto-loading succeeded message"
+            // snprintf(msg, msg_size - 1,
+            //       msg_hash_to_str(MSG_AUTOLOADING_SAVESTATE_SUCCEEDED),
+            //       state->path);
+         }
          else
          {
             if (state->state_slot < 0)
@@ -1044,9 +1045,9 @@ static void task_load_handler(retro_task_t *task)
                snprintf(msg, msg_size - 1,
                      msg_hash_to_str(MSG_LOADED_STATE_FROM_SLOT),
                      state->state_slot);
+            task_set_title(task, strdup(msg));
          }
 
-         task_set_title(task, strdup(msg));
          free(msg);
       }
 
