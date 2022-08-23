@@ -568,8 +568,10 @@ typedef struct materialui_handle
       materialui_font_data_t hint;  /* ptr alignment */
    } font_data;
 
-   void (*word_wrap)(char *dst, size_t dst_size, const char *src,
-      int line_width, int wideglyph_width, unsigned max_lines);
+   void (*word_wrap)(
+         char *dst, size_t dst_size,
+         const char *src, size_t src_len,
+         int line_width, int wideglyph_width, unsigned max_lines);
 
    /* Thumbnail helpers */
    gfx_thumbnail_path_data_t *thumbnail_path_data;
@@ -658,6 +660,8 @@ typedef struct materialui_handle
    enum materialui_landscape_layout_optimization_type
          last_landscape_layout_optimization;
    enum materialui_list_view_type list_view_type;
+   char sysicons_path[PATH_MAX_LENGTH];
+   char icons_path[PATH_MAX_LENGTH];
    char msgbox[1024];
    char menu_title[255];
    char fullscreen_thumbnail_label[255];
@@ -2205,14 +2209,8 @@ static void materialui_context_reset_playlist_icons(
       materialui_handle_t *mui)
 {
    size_t i;
-   char icon_path[PATH_MAX_LENGTH];
-   icon_path[0] = '\0';
-   /* Get icon directory */
-   fill_pathname_application_special(
-         icon_path, sizeof(icon_path),
-         APPLICATION_SPECIAL_DIRECTORY_ASSETS_SYSICONS);
 
-   if (string_is_empty(icon_path))
+   if (string_is_empty(mui->sysicons_path))
       return;
 
    /* Load icons
@@ -2226,7 +2224,7 @@ static void materialui_context_reset_playlist_icons(
          continue;
 
       gfx_display_reset_textures_list(
-            image_file, icon_path,
+            image_file, mui->sysicons_path,
             &mui->textures.playlist.icons[i].image,
             TEXTURE_FILTER_MIPMAP_LINEAR, NULL, NULL);
    }
@@ -2302,9 +2300,10 @@ static void materialui_refresh_playlist_icon_list(
 
    for (i = 0; i < file_list->size; i++)
    {
+      size_t _len;
       const char *path          = file_list->elems[i].data;
       const char *playlist_file = NULL;
-      char image_file[PATH_MAX_LENGTH];
+      char image_file[256];
 
       /* We used malloc() to create the icons
        * array - ensure struct members are
@@ -2335,12 +2334,12 @@ static void materialui_refresh_playlist_icon_list(
          continue;
 
       /* Playlist is valid - generate image file name */
-      strlcpy(image_file, playlist_file, sizeof(image_file));
-      path_remove_extension(image_file);
-      strlcat(image_file, FILE_PATH_PNG_EXTENSION, sizeof(image_file));
-
-      if (string_is_empty(image_file))
-         continue;
+      _len                  = strlcpy(image_file,
+            playlist_file, sizeof(image_file));
+      /* Manually rename extension 'lpl' to 'png' in string */
+      image_file[_len-3]    = 'p';
+      image_file[_len-2]    = 'n';
+      image_file[_len-1]    = 'g';
 
       /* All good - cache paths */
       mui->textures.playlist.icons[i].playlist_file = strdup(playlist_file);
@@ -2397,23 +2396,16 @@ static uintptr_t materialui_get_playlist_icon(
 static void materialui_context_reset_textures(materialui_handle_t *mui)
 {
    bool has_all_assets = true;
-   char icon_path[PATH_MAX_LENGTH];
    unsigned i;
-
-   icon_path[0] = '\0';
-
-   fill_pathname_application_special(
-         icon_path, sizeof(icon_path),
-         APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_ICONS);
 
    /* Loop through all textures */
    for (i = 0; i < MUI_TEXTURE_LAST; i++)
    {
       if (!gfx_display_reset_textures_list(
-            materialui_texture_path(i), icon_path, &mui->textures.list[i],
+            materialui_texture_path(i), mui->icons_path, &mui->textures.list[i],
             TEXTURE_FILTER_MIPMAP_LINEAR, NULL, NULL))
       {
-         RARCH_WARN("[GLUI]: Asset missing: \"%s%s%s\".\n", icon_path,
+         RARCH_WARN("[GLUI]: Asset missing: \"%s%s%s\".\n", mui->icons_path,
                PATH_DEFAULT_SLASH(), materialui_texture_path(i));
          has_all_assets = false;
       }
@@ -2644,7 +2636,8 @@ static void materialui_render_messagebox(
 
    /* Split message into lines */
    (mui->word_wrap)(
-         wrapped_message, sizeof(wrapped_message), message,
+         wrapped_message, sizeof(wrapped_message),
+         message, strlen(message),
          usable_width / (int)mui->font_data.list.glyph_width,
          mui->font_data.list.wideglyph_width, 0);
 
@@ -2671,9 +2664,8 @@ static void materialui_render_messagebox(
 
       if (!string_is_empty(line))
       {
-         int width = font_driver_get_message_width(
+         int width     = font_driver_get_message_width(
                mui->font_data.list.font, line, (unsigned)strlen(line), 1);
-
          longest_width = (width > longest_width) ?
                width : longest_width;
       }
@@ -2807,7 +2799,8 @@ static unsigned materialui_count_sublabel_lines(
          (has_icon ? (int)mui->icon_size : 0);
 
    (mui->word_wrap)(
-         wrapped_sublabel_str, sizeof(wrapped_sublabel_str), entry.sublabel,
+         wrapped_sublabel_str, sizeof(wrapped_sublabel_str),
+         entry.sublabel, strlen(entry.sublabel),
          sublabel_width_max / (int)mui->font_data.hint.glyph_width,
          mui->font_data.hint.wideglyph_width, 0);
 
@@ -4123,8 +4116,10 @@ static void materialui_render_menu_entry_default(
       sublabel_y   = entry_y + vertical_margin + mui->font_data.list.line_height + (int)mui->sublabel_gap + mui->font_data.hint.line_ascender;
 
       /* Wrap sublabel string */
-      (mui->word_wrap)(wrapped_sublabel, sizeof(wrapped_sublabel), entry->sublabel,
-            (int)((usable_width - (int)mui->sublabel_padding) / mui->font_data.hint.glyph_width),
+      (mui->word_wrap)(wrapped_sublabel, sizeof(wrapped_sublabel),
+            entry->sublabel, strlen(entry->sublabel),
+            (int)((usable_width - (int)mui->sublabel_padding) 
+               / mui->font_data.hint.glyph_width),
             mui->font_data.hint.wideglyph_width, 0);
 
       /* Draw sublabel string
@@ -4467,8 +4462,10 @@ static void materialui_render_menu_entry_playlist_list(
       sublabel_y   = entry_y + vertical_margin + mui->font_data.list.line_height + (int)mui->sublabel_gap + mui->font_data.hint.line_ascender;
 
       /* Wrap sublabel string */
-      (mui->word_wrap)(wrapped_sublabel, sizeof(wrapped_sublabel), entry->sublabel,
-            (int)((usable_width - (int)mui->sublabel_padding) / mui->font_data.hint.glyph_width),
+      (mui->word_wrap)(wrapped_sublabel, sizeof(wrapped_sublabel),
+            entry->sublabel, strlen(entry->sublabel),
+            (int)((usable_width - (int)mui->sublabel_padding) 
+               / mui->font_data.hint.glyph_width),
             mui->font_data.hint.wideglyph_width, 0);
 
       /* Draw sublabel string
@@ -7740,6 +7737,8 @@ static void materialui_init_font(
 {
    char fontpath[PATH_MAX_LENGTH];
    const char *wideglyph_str = msg_hash_get_wideglyph_str();
+   settings_t *settings      = config_get_ptr();
+   const char *dir_assets    = settings->paths.directory_assets;
    fontpath[0]               = '\0';
 
    /* We assume the average glyph aspect ratio is close to 3:4 */
@@ -7750,8 +7749,39 @@ static void materialui_init_font(
       gfx_display_font_free(font_data->font);
       font_data->font = NULL;
    }
-   fill_pathname_application_special(
-         fontpath, sizeof(fontpath), APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_FONT);
+   {
+      char s1[PATH_MAX_LENGTH];
+
+      switch (*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE))
+      {
+         case RETRO_LANGUAGE_ARABIC:
+         case RETRO_LANGUAGE_PERSIAN:
+            fill_pathname_join_special(s1,
+                  settings->paths.directory_assets, "pkg", sizeof(s1));
+            fill_pathname_join_special(fontpath, s1, "fallback-font.ttf",
+                  sizeof(fontpath));
+            break;
+         case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
+         case RETRO_LANGUAGE_CHINESE_TRADITIONAL:
+            fill_pathname_join_special(s1,
+                  settings->paths.directory_assets, "pkg", sizeof(s1));
+            fill_pathname_join_special(fontpath, s1, "chinese-fallback-font.ttf",
+                  sizeof(fontpath));
+            break;
+         case RETRO_LANGUAGE_KOREAN:
+            fill_pathname_join_special(s1,
+                  settings->paths.directory_assets, "pkg", sizeof(s1));
+            fill_pathname_join_special(fontpath, s1, "korean-fallback-font.ttf",
+                  sizeof(fontpath));
+            break;
+         default:
+            fill_pathname_join_special(s1, dir_assets, "glui", sizeof(s1));
+            fill_pathname_join_special(fontpath, s1, FILE_PATH_TTF_FONT,
+                  sizeof(fontpath));
+            break;
+      }
+   }
+
    font_data->font = gfx_display_font_file(p_disp,
          fontpath, font_size, video_is_threaded);
 
@@ -7937,6 +7967,7 @@ static void *materialui_init(void **userdata, bool video_is_threaded)
    gfx_display_t *p_disp                  = disp_get_ptr();
    menu_handle_t *menu                    = (menu_handle_t*)
       calloc(1, sizeof(*menu));
+   const char *dir_assets                 = NULL;
 
    if (!menu)
       return NULL;
@@ -7947,17 +7978,15 @@ static void *materialui_init(void **userdata, bool video_is_threaded)
       return NULL;
    }
 
-   mui                                    = (materialui_handle_t*)
-      calloc(1, sizeof(materialui_handle_t));
+   dir_assets                             = settings->paths.directory_assets;
 
-   if (!mui)
+   if (!(mui = (materialui_handle_t*)calloc(1, sizeof(materialui_handle_t))))
       goto error;
 
    *userdata = mui;
 
    /* Initialise thumbnail path data */
-   mui->thumbnail_path_data               = gfx_thumbnail_path_init();
-   if (!mui->thumbnail_path_data)
+   if (!(mui->thumbnail_path_data = gfx_thumbnail_path_init()))
       goto error;
 
    /* Get DPI/screen-size-aware base unit size for
@@ -7997,8 +8026,7 @@ static void *materialui_init(void **userdata, bool video_is_threaded)
    materialui_prepare_colors(mui, (enum materialui_color_theme)mui->color_theme);
 
    /* Initialise screensaver */
-   mui->screensaver                       = menu_screensaver_init();
-   if (!mui->screensaver)
+   if (!(mui->screensaver = menu_screensaver_init()))
       goto error;
 
    /* Initial ticker configuration */
@@ -8058,10 +8086,18 @@ static void *materialui_init(void **userdata, bool video_is_threaded)
          settings->bools.menu_materialui_icons_enable,
          settings->bools.menu_materialui_playlist_icons_enable);
 
+   /* NOTE: There are no MaterialUI system icons,
+      so we just reuse the Ozone icon directory instead here */
+   fill_pathname_application_special(mui->sysicons_path, 
+         sizeof(mui->sysicons_path),
+         APPLICATION_SPECIAL_DIRECTORY_ASSETS_OZONE_ICONS);
+   fill_pathname_join_special(mui->icons_path, dir_assets, "glui",
+         sizeof(mui->icons_path));
+
    p_anim->updatetime_cb = materialui_menu_animation_update_time;
 
    /* set word_wrap function pointer */
-   mui->word_wrap = msg_hash_get_wideglyph_str() ? word_wrap_wideglyph : word_wrap;
+   mui->word_wrap        = msg_hash_get_wideglyph_str() ? word_wrap_wideglyph : word_wrap;
 
    return menu;
 error:

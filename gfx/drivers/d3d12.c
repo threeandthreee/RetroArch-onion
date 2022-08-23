@@ -687,21 +687,18 @@ static bool d3d12_gfx_set_shader(void* data, enum rarch_shader_type type, const 
             { "TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(d3d12_vertex_t, texcoord),
               D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
          };
-         static const char vs_ext[] = ".vs.hlsl";
-         static const char ps_ext[] = ".ps.hlsl";
-         char              vs_path[PATH_MAX_LENGTH] = {0};
-         char              ps_path[PATH_MAX_LENGTH] = {0};
-         const char*       slang_path = d3d12->shader_preset->pass[i].source.path;
-         const char*       vs_src     = d3d12->shader_preset->pass[i].source.string.vertex;
-         const char*       ps_src     = d3d12->shader_preset->pass[i].source.string.fragment;
-
+         char vs_path[PATH_MAX_LENGTH];
+         char ps_path[PATH_MAX_LENGTH];
+         const char *slang_path = d3d12->shader_preset->pass[i].source.path;
+         const char *vs_src     = d3d12->shader_preset->pass[i].source.string.vertex;
+         const char *ps_src     = d3d12->shader_preset->pass[i].source.string.fragment;
          strlcpy(vs_path, slang_path, sizeof(vs_path));
          strlcpy(ps_path, slang_path, sizeof(ps_path));
-         strlcat(vs_path, vs_ext, sizeof(vs_path));
-         strlcat(ps_path, ps_ext, sizeof(ps_path));
+         strlcat(vs_path, ".vs.hlsl", sizeof(vs_path));
+         strlcat(ps_path, ".ps.hlsl", sizeof(ps_path));
 
-         if (!d3d_compile(vs_src, 0, vs_path,"main","vs_5_0", &vs_code)){ }
-         if (!d3d_compile(ps_src, 0, ps_path,"main","ps_5_0", &ps_code)){ }
+         if (!d3d_compile(vs_src, 0, vs_path, "main", "vs_5_0", &vs_code)){ }
+         if (!d3d_compile(ps_src, 0, ps_path, "main", "ps_5_0", &ps_code)){ }
 
          desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
          if (i == d3d12->shader_preset->passes - 1)
@@ -1412,11 +1409,7 @@ static void d3d12_init_base(d3d12_video_t* d3d12)
          if (FAILED(DXGIEnumAdapters(d3d12->factory, i, &adapter)))
             break;
 #endif
-#ifdef __cplusplus
-         adapter->GetDesc(adapter, &desc);
-#else
          adapter->lpVtbl->GetDesc(adapter, &desc);
-#endif
 
          utf16_to_char_string((const uint16_t*)desc.Description, str, sizeof(str));
 

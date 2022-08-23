@@ -161,9 +161,9 @@ int system_property_get(const char *command,
       const char *args, char *value)
 {
    FILE *pipe;
+   char buffer[BUFSIZ];
+   char cmd[NAME_MAX_LENGTH];
    int length                   = 0;
-   char buffer[PATH_MAX_LENGTH] = {0};
-   char cmd[NAME_MAX_LENGTH]    = {0};
    char *curpos                 = NULL;
    size_t buf_pos               = strlcpy(cmd, command, sizeof(cmd));
 
@@ -172,16 +172,17 @@ int system_property_get(const char *command,
 
    buf_pos                      = strlcat(cmd, args, sizeof(cmd));
 
-   pipe                         = popen(cmd, "r");
-
-   if (!pipe)
-      goto error;
+   if (!(pipe = popen(cmd, "r")))
+   {
+      RARCH_ERR("Could not create pipe.\n");
+      return 0;
+   }
 
    curpos = value;
 
    while (!feof(pipe))
    {
-      if (fgets(buffer, 128, pipe))
+      if (fgets(buffer, sizeof(buffer), pipe))
       {
          int curlen = strlen(buffer);
 
@@ -197,10 +198,6 @@ int system_property_get(const char *command,
    pclose(pipe);
 
    return length;
-
-error:
-   RARCH_ERR("Could not create pipe.\n");
-   return 0;
 }
 
 #ifdef ANDROID
@@ -622,13 +619,13 @@ static bool device_is_android_tv()
 
 bool test_permissions(const char *path)
 {
+   char buf[PATH_MAX_LENGTH];
    bool ret                  = false;
-   char buf[PATH_MAX_LENGTH] = {0};
 
    __android_log_print(ANDROID_LOG_INFO,
       "RetroArch", "Testing permissions for %s\n",path);
 
-   fill_pathname_join(buf, path, ".retroarch", sizeof(buf));
+   fill_pathname_join_special(buf, path, ".retroarch", sizeof(buf));
    ret = path_mkdir(buf);
 
    __android_log_print(ANDROID_LOG_INFO,
@@ -913,10 +910,7 @@ static void check_proc_acpi_sysfs_ac_adapter(const char * node, bool *have_ac)
    int64_t length   = 0;
    char     *buf    = NULL;
    const char *base = proc_acpi_sysfs_ac_adapter_path;
-
-   path[0]          = '\0';
-
-   snprintf(path, sizeof(path), "%s/%s", base, "online");
+   fill_pathname_join_special(path, base, "online", sizeof(path));
    if (!filestream_exists(path))
       return;
 
@@ -1275,7 +1269,7 @@ static void frontend_unix_get_os(char *s,
    int rel;
    frontend_android_get_version(major, minor, &rel);
 
-   strcpy_literal(s, "Android");
+   strlcpy(s, "Android", len);
 #else
    char *ptr;
    struct utsname buffer;
@@ -1286,19 +1280,19 @@ static void frontend_unix_get_os(char *s,
    *major = (int)strtol(buffer.release, &ptr, 10);
    *minor = (int)strtol(++ptr, NULL, 10);
 #if defined(__FreeBSD__)
-   strcpy_literal(s, "FreeBSD");
+   strlcpy(s, "FreeBSD", len);
 #elif defined(__NetBSD__)
-   strcpy_literal(s, "NetBSD");
+   strlcpy(s, "NetBSD", len);
 #elif defined(__OpenBSD__)
-   strcpy_literal(s, "OpenBSD");
+   strlcpy(s, "OpenBSD", len);
 #elif defined(__DragonFly__)
-   strcpy_literal(s, "DragonFly BSD");
+   strlcpy(s, "DragonFly BSD", len);
 #elif defined(BSD)
-   strcpy_literal(s, "BSD");
+   strlcpy(s, "BSD", len);
 #elif defined(__HAIKU__)
-   strcpy_literal(s, "Haiku");
+   strlcpy(s, "Haiku", len);
 #else
-   strcpy_literal(s, "Linux");
+   strlcpy(s, "Linux", len);
 #endif
 #endif
 }
@@ -1791,7 +1785,7 @@ static void frontend_unix_get_env(int *argc,
       strlcat(base_path, "/.config/retroarch", sizeof(base_path));
    }
    else
-      strcpy_literal(base_path, "retroarch");
+      strlcpy(base_path, "retroarch", sizeof(base_path));
 #endif
 
    if (!string_is_empty(libretro_directory))
@@ -2156,7 +2150,7 @@ static int frontend_unix_parse_drive_list(void *data, bool load_content)
       if (storage_permissions == INTERNAL_STORAGE_WRITABLE)
       {
          char user_data_path[PATH_MAX_LENGTH];
-         fill_pathname_join(user_data_path,
+         fill_pathname_join_special(user_data_path,
                internal_storage_path, "RetroArch",
                sizeof(user_data_path));
 
@@ -2390,9 +2384,7 @@ static uint64_t frontend_unix_get_total_mem(void)
    line[0] = '\0';
 
    /* Open /proc/meminfo */
-   meminfo_file = fopen(PROC_MEMINFO_PATH, "r");
-
-   if (!meminfo_file)
+   if (!(meminfo_file = fopen(PROC_MEMINFO_PATH, "r")))
       return 0;
 
    /* Parse lines
@@ -2438,9 +2430,7 @@ static uint64_t frontend_unix_get_free_mem(void)
    line[0] = '\0';
 
    /* Open /proc/meminfo */
-   meminfo_file = fopen(PROC_MEMINFO_PATH, "r");
-
-   if (!meminfo_file)
+   if (!(meminfo_file = fopen(PROC_MEMINFO_PATH, "r")))
       return 0;
 
    /* Parse lines
@@ -2811,10 +2801,14 @@ static bool accessibility_speak_unix(int speed,
    else if (speed > 10)
       speed = 10;
 
-   strcpy_literal(voice_out, "-v");
+   voice_out[0] = '-';
+   voice_out[1] = 'v';
+   voice_out[2] = '\0';
    strlcat(voice_out, language, 5);
 
-   strcpy_literal(speed_out, "-s");
+   speed_out[0] = '-';
+   speed_out[1] = 's';
+   speed_out[2] = '\0';
    strlcat(speed_out, speeds[speed-1], 6);
 
    if (priority < 10 && speak_pid > 0)

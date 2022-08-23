@@ -973,7 +973,7 @@ int16_t input_joypad_analog_axis(
    return res;
 }
 
-bool input_keyboard_line_append(
+void input_keyboard_line_append(
       struct input_keyboard_line *keyboard_line,
       const char *word)
 {
@@ -984,7 +984,7 @@ bool input_keyboard_line_append(
          keyboard_line->size + len * 2);
 
    if (!newbuf)
-      return false;
+      return;
 
    memmove(
          newbuf + keyboard_line->ptr + len,
@@ -1001,7 +1001,6 @@ bool input_keyboard_line_append(
    newbuf[keyboard_line->size]  = '\0';
 
    keyboard_line->buffer        = newbuf;
-   return true;
 }
 
 const char **input_keyboard_start_line(
@@ -1033,7 +1032,7 @@ static bool input_remote_init_network(input_remote_t *handle,
    RARCH_LOG("Bringing up remote interface on port %hu.\n",
          (unsigned short)port);
 
-   if ((fd = socket_init((void**)&res, port, NULL, SOCKET_TYPE_DATAGRAM)) < 0)
+   if ((fd = socket_init((void**)&res, port, NULL, SOCKET_TYPE_DATAGRAM, AF_INET)) < 0)
       goto error;
 
    handle->net_fd[user] = fd;
@@ -1089,7 +1088,7 @@ static input_remote_t *input_remote_new(
    return handle;
 }
 
-void input_remote_parse_packet(
+static void input_remote_parse_packet(
       input_remote_state_t *input_state,
       struct remote_message *msg, unsigned user)
 {
@@ -1120,7 +1119,21 @@ input_remote_t *input_driver_init_remote(
 #endif
 
 #ifdef HAVE_OVERLAY
-bool input_overlay_add_inputs_inner(overlay_desc_t *desc,
+/**
+ * input_overlay_add_inputs:
+ * @desc : pointer to overlay description
+ * @ol_state : pointer to overlay state. If valid, inputs
+ *             that are actually 'touched' on the overlay
+ *             itself will displayed. If NULL, inputs from
+ *             the device connected to 'port' will be displayed.
+ * @port : when ol_state is NULL, specifies the port of
+ *         the input device from which input will be
+ *         displayed.
+ *
+ * Adds inputs from current_input to the overlay, so it's displayed
+ * @return true if an input that is pressed will change the overlay
+ */
+static bool input_overlay_add_inputs_inner(overlay_desc_t *desc,
       input_overlay_state_t *ol_state, unsigned port)
 {
    switch(desc->type)
@@ -1223,7 +1236,7 @@ bool input_overlay_add_inputs_inner(overlay_desc_t *desc,
    return false;
 }
 
-bool input_overlay_add_inputs(input_overlay_t *ol,
+static bool input_overlay_add_inputs(input_overlay_t *ol,
       bool show_touched, unsigned port)
 {
    size_t i;
@@ -2209,9 +2222,15 @@ void input_config_get_bind_string_joykey(
             !string_is_empty(bind->joykey_label)
             && input_descriptor_label_show)
       {
-         fill_pathname_join_delim(buf, prefix,
+         size_t len = fill_pathname_join_delim(buf, prefix,
                bind->joykey_label, ' ', size);
-         strlcat(buf, " (hat)", size);
+         buf[len  ] = ' ';
+         buf[len+1] = '(';
+         buf[len+2] = 'h';
+         buf[len+3] = 'a';
+         buf[len+4] = 't';
+         buf[len+5] = ')';
+         buf[len+6] = '\0';
       }
       else
       {
@@ -2245,9 +2264,15 @@ void input_config_get_bind_string_joykey(
             !string_is_empty(bind->joykey_label)
             && input_descriptor_label_show)
       {
-         fill_pathname_join_delim(buf, prefix,
+         size_t len = fill_pathname_join_delim(buf, prefix,
                bind->joykey_label, ' ', size);
-         strlcat(buf, " (btn)", size);
+         buf[len  ] = ' ';
+         buf[len+1] = '(';
+         buf[len+2] = 'b';
+         buf[len+3] = 't';
+         buf[len+4] = 'n';
+         buf[len+5] = ')';
+         buf[len+6] = '\0';
       }
       else
          snprintf(buf, size, "%s%u (%s)", prefix, (unsigned)bind->joykey,
@@ -2264,9 +2289,16 @@ void input_config_get_bind_string_joyaxis(
          !string_is_empty(bind->joyaxis_label)
          && input_descriptor_label_show)
    {
-      fill_pathname_join_delim(buf, prefix,
+      size_t len = fill_pathname_join_delim(buf, prefix,
             bind->joyaxis_label, ' ', size);
-      strlcat(buf, " (axis)", size);
+      buf[len  ] = ' ';
+      buf[len+1] = '(';
+      buf[len+2] = 'a';
+      buf[len+3] = 'x';
+      buf[len+4] = 'i';
+      buf[len+5] = 's';
+      buf[len+6] = ')';
+      buf[len+7] = '\0';
    }
    else
    {
@@ -2924,7 +2956,8 @@ void input_config_set_device_config_path(unsigned port, const char *path)
       input_driver_state_t *input_st = &input_driver_st;
       if (fill_pathname_parent_dir_name(parent_dir_name,
                path, sizeof(parent_dir_name)))
-         fill_pathname_join(input_st->input_device_info[port].config_path,
+         fill_pathname_join_special(
+               input_st->input_device_info[port].config_path,
                parent_dir_name, path_basename_nocompression(path),
                sizeof(input_st->input_device_info[port].config_path));
    }
@@ -4631,18 +4664,27 @@ static bool runloop_check_movie_init(input_driver_state_t *input_st,
    char msg[16384], path[8192];
    bsv_movie_t *state          = NULL;
    int state_slot              = settings->ints.state_slot;
-
-   msg[0] = path[0]            = '\0';
+   msg[0]                      =  '\0';
 
    configuration_set_uint(settings, settings->uints.rewind_granularity, 1);
 
    if (state_slot > 0)
+   {
+      path[0]      = '\0';
       snprintf(path, sizeof(path), "%s%d.bsv",
             input_st->bsv_movie_state.movie_path,
             state_slot);
+   }
    else
-      snprintf(path, sizeof(path), "%s.bsv",
-            input_st->bsv_movie_state.movie_path);
+   {
+      size_t _len  = strlcpy(path,
+            input_st->bsv_movie_state.movie_path, sizeof(path));
+      path[_len  ] = '.';
+      path[_len+1] = 'b';
+      path[_len+2] = 's';
+      path[_len+3] = 'v';
+      path[_len+4] = '\0';
+   }
 
    snprintf(msg, sizeof(msg), "%s \"%s\".",
          msg_hash_to_str(MSG_STARTING_MOVIE_RECORD_TO),

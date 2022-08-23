@@ -209,7 +209,7 @@ command_t* command_network_new(uint16_t port)
    command_network_t *netcmd = (command_network_t*)calloc(
                                    1, sizeof(command_network_t));
    int fd                    = socket_init(
-         (void**)&res, port, NULL, SOCKET_TYPE_DATAGRAM);
+         (void**)&res, port, NULL, SOCKET_TYPE_DATAGRAM, AF_INET);
 
    RARCH_LOG("[NetCMD]: %s %hu.\n",
          msg_hash_to_str(MSG_BRINGING_UP_COMMAND_INTERFACE_ON_PORT),
@@ -540,6 +540,48 @@ static bool command_verify(const char *cmd)
    return false;
 }
 
+static bool udp_send_packet(const char *host, uint16_t port, const char *msg)
+{
+   char port_buf[6];
+   const struct addrinfo *tmp_info;
+   struct addrinfo *addr = NULL;
+   struct addrinfo hints = {0};
+   size_t          len   = strlen(msg);
+   bool            ret   = false;
+
+   snprintf(port_buf, sizeof(port_buf), "%hu", (unsigned short)port);
+
+   hints.ai_socktype = SOCK_DGRAM;
+   hints.ai_flags    = AI_NUMERICSERV;
+
+   if (getaddrinfo_retro(host, port_buf, &hints, &addr))
+      return false;
+   if (!addr)
+      return false;
+
+   /* Send to all possible targets. */
+   tmp_info = addr;
+
+   do
+   {
+      int fd = socket(tmp_info->ai_family,
+         tmp_info->ai_socktype, tmp_info->ai_protocol);
+
+      if (fd < 0)
+         continue;
+
+      if (sendto(fd, msg, len, 0, tmp_info->ai_addr, tmp_info->ai_addrlen) ==
+            (ssize_t)len)
+         ret = true;
+
+      socket_close(fd);
+   } while ((tmp_info = tmp_info->ai_next));
+
+   freeaddrinfo_retro(addr);
+
+   return ret;
+}
+
 bool command_network_send(const char *cmd_)
 {
    char *command        = NULL;
@@ -757,7 +799,7 @@ bool command_get_status(command_t *cmd, const char* arg)
    content_get_status(&contentless, &is_inited);
 
    if (!is_inited)
-       strcpy_literal(reply, "GET_STATUS CONTENTLESS");
+       strlcpy(reply, "GET_STATUS CONTENTLESS", sizeof(reply));
    else
    {
        /* add some content info */
@@ -1395,7 +1437,7 @@ bool command_set_shader(command_t *cmd, const char *arg)
       {
          char abs_arg[PATH_MAX_LENGTH];
          const char *ref_path = settings->paths.directory_video_shader;
-         fill_pathname_join(abs_arg, ref_path, arg, sizeof(abs_arg));
+         fill_pathname_join_special(abs_arg, ref_path, arg, sizeof(abs_arg));
          return apply_shader(settings, type, abs_arg, true);
       }
    }
@@ -1434,8 +1476,6 @@ bool command_event_save_core_config(
    }
 
    core_path                       = path_get(RARCH_PATH_CORE);
-   config_name[0]                  = '\0';
-   config_path[0]                  = '\0';
 
    /* Infer file name based on libretro core. */
    if (path_is_valid(core_path))
@@ -1446,16 +1486,17 @@ bool command_event_save_core_config(
 
       fill_pathname_base(config_name, core_path, sizeof(config_name));
       path_remove_extension(config_name);
-      fill_pathname_join(config_path, config_dir, config_name,
+      fill_pathname_join_special(config_path, config_dir, config_name,
             sizeof(config_path));
 
       /* In case of collision, find an alternative name. */
       for (i = 0; i < 16; i++)
       {
          if (i)
-            snprintf(tmp, sizeof(tmp), "%s-%u.cfg", config_path, i);
+            snprintf(tmp, sizeof(tmp), "%s-%u", config_path, i);
          else
-            snprintf(tmp, sizeof(tmp), "%s.cfg", config_path);
+            strlcpy(tmp, config_path, sizeof(tmp));
+         strlcat(tmp, ".cfg", sizeof(tmp));
 
          if (!path_is_valid(tmp))
          {
@@ -1471,7 +1512,7 @@ bool command_event_save_core_config(
       RARCH_WARN("[Config]: %s\n",
             msg_hash_to_str(MSG_CANNOT_INFER_NEW_CONFIG_PATH));
       fill_dated_filename(config_name, ".cfg", sizeof(config_name));
-      fill_pathname_join(config_path, config_dir, config_name,
+      fill_pathname_join_special(config_path, config_dir, config_name,
             sizeof(config_path));
    }
 

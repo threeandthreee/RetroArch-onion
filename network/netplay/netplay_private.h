@@ -63,33 +63,9 @@
 
 /* Quirks mandated by how particular cores save states. This is distilled from
  * the larger set of quirks that the quirks environment can communicate. */
-#define NETPLAY_QUIRK_NO_SAVESTATES (1<<0)
-#define NETPLAY_QUIRK_NO_TRANSMISSION (1<<1)
-#define NETPLAY_QUIRK_INITIALIZATION (1<<2)
-#define NETPLAY_QUIRK_ENDIAN_DEPENDENT (1<<3)
-#define NETPLAY_QUIRK_PLATFORM_DEPENDENT (1<<4)
-
-/* Mapping of serialization quirks to netplay quirks. */
-#define NETPLAY_QUIRK_MAP_UNDERSTOOD (\
-   RETRO_SERIALIZATION_QUIRK_INCOMPLETE |\
-   RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE |\
-   RETRO_SERIALIZATION_QUIRK_CORE_VARIABLE_SIZE |\
-   RETRO_SERIALIZATION_QUIRK_FRONT_VARIABLE_SIZE |\
-   RETRO_SERIALIZATION_QUIRK_SINGLE_SESSION |\
-   RETRO_SERIALIZATION_QUIRK_ENDIAN_DEPENDENT |\
-   RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT \
-)
-
-#define NETPLAY_QUIRK_MAP_NO_SAVESTATES \
-   (RETRO_SERIALIZATION_QUIRK_INCOMPLETE)
-#define NETPLAY_QUIRK_MAP_NO_TRANSMISSION \
-   (RETRO_SERIALIZATION_QUIRK_SINGLE_SESSION)
-#define NETPLAY_QUIRK_MAP_INITIALIZATION \
-   (RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)
-#define NETPLAY_QUIRK_MAP_ENDIAN_DEPENDENT \
-   (RETRO_SERIALIZATION_QUIRK_ENDIAN_DEPENDENT)
-#define NETPLAY_QUIRK_MAP_PLATFORM_DEPENDENT \
-   (RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT)
+#define NETPLAY_QUIRK_INITIALIZATION     (1 << 0)
+#define NETPLAY_QUIRK_ENDIAN_DEPENDENT   (1 << 1)
+#define NETPLAY_QUIRK_PLATFORM_DEPENDENT (1 << 2)
 
 /* Compression protocols supported */
 #define NETPLAY_COMPRESSION_ZLIB (1<<0)
@@ -282,10 +258,7 @@ enum rarch_netplay_stall_reason
    NETPLAY_STALL_INPUT_LATENCY,
 
    /* The server asked us to stall */
-   NETPLAY_STALL_SERVER_REQUESTED,
-
-   /* We have no connection and must have one to proceed */
-   NETPLAY_STALL_NO_CONNECTION
+   NETPLAY_STALL_SERVER_REQUESTED
 };
 
 /* Input state for a particular client-device pair */
@@ -365,9 +338,6 @@ typedef struct netplay_address
 /* Each connection gets a connection struct */
 struct netplay_connection
 {
-   /* Is this connection stalling? */
-   retro_time_t stall_time;
-
    /* Timer used to estimate a connection's latency */
    retro_time_t ping_timer;
 
@@ -398,6 +368,10 @@ struct netplay_connection
     * this client to stall?
     * For the client: How many frames of stall do we have left? */
    uint32_t stall_frame;
+
+   /* How many times has this connection caused a stall because it's running
+      too slow? */
+   uint32_t stall_slow;
 
    /* What latency is this connection running on? 
     * Network latency has limited precision as we estimate it
@@ -483,9 +457,6 @@ struct netplay_chat
 
 struct netplay
 {
-   /* Quirks in the savestate implementation */
-   uint64_t quirks;
-
    /* We stall if we're far enough ahead that we
     * couldn't transparently rewind.
     * To know if we could transparently rewind,
@@ -560,6 +531,9 @@ struct netplay
    /* Pseudo random seed */
    unsigned long simple_rand_next;
 
+   /* Quirks in the savestate implementation */
+   uint32_t quirks;
+
    /* Our client number */
    uint32_t self_client_num;
 
@@ -592,6 +566,9 @@ struct netplay
    uint32_t server_frame_count;
    uint32_t replay_frame_count;
 
+   /* Frequency with which to check CRCs */
+   uint32_t check_frames;
+
    /* How far behind did we fall? */
    uint32_t catch_up_behind;
 
@@ -603,16 +580,10 @@ struct netplay
    int32_t input_latency_frames_min;
    int32_t input_latency_frames_max;
 
-   /* Counter for timeouts */
-   unsigned timeout_cnt;
-
    /* TCP connection for listening (server only) */
    int listen_fd;
 
    int frame_run_time_ptr;
-
-   /* Frequency with which to check CRCs */
-   int check_frames;
 
    /* Latency frames; positive to hide network latency, 
     * negative to hide input latency */
@@ -649,10 +620,6 @@ struct netplay
     * state load, then perform the state load, and the 
     * up/down states will proceed as expected. */
    bool have_updown_device;
-
-   /* If true, never progress without peer input 
-    * (stateless/rewindless mode) */
-   bool stateless_mode;
 
    /* Are we the server? */
    bool is_server;

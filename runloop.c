@@ -1080,7 +1080,7 @@ static bool validate_per_core_options(char *s,
    if (mkdir && !path_is_valid(s))
    {
       char new_path[PATH_MAX_LENGTH];
-      fill_pathname_join(new_path,
+      fill_pathname_join_special(new_path,
             config_directory, core_name, sizeof(new_path));
       if (!path_is_directory(new_path))
          path_mkdir(new_path);
@@ -1102,9 +1102,8 @@ static bool validate_game_options(
 /**
  * game_specific_options:
  *
- * Returns: true (1) if a game specific core
- * options path has been found,
- * otherwise false (0).
+ * @return true if a game specific core
+ * options path has been found, otherwise false.
  **/
 static bool validate_game_specific_options(char **output)
 {
@@ -1150,9 +1149,8 @@ static bool validate_folder_options(
 /**
  * validate_folder_specific_options:
  *
- * Returns: true (1) if a folder specific core
- * options path has been found,
- * otherwise false (0).
+ * @return true if a folder specific core
+ * options path has been found, otherwise false.
  **/
 static bool validate_folder_specific_options(
       char **output)
@@ -1173,7 +1171,10 @@ static bool validate_folder_specific_options(
    return true;
 }
 
-/* Fetches core options path for current core/content
+/**
+ * runloop_init_core_options_path:
+ *
+ * Fetches core options path for current core/content
  * - path: path from which options should be read
  *   from/saved to
  * - src_path: in the event that 'path' file does not
@@ -1182,7 +1183,8 @@ static bool validate_folder_specific_options(
  *
  *   NOTE: caller must ensure 
  *   path and src_path are NULL-terminated
- *  */
+ *
+ **/
 static void runloop_init_core_options_path(
       settings_t *settings,
       char *path, size_t len,
@@ -1307,7 +1309,6 @@ static core_option_manager_t *runloop_init_core_options(
             categories_enabled);
    return NULL;
 }
-
 
 static core_option_manager_t *runloop_init_core_variables(
       settings_t *settings, const struct retro_variable *vars)
@@ -3020,7 +3021,10 @@ bool runloop_environment_cb(unsigned cmd, void *data)
             result &= ~(1|2);
 #endif
 #if defined(HAVE_RUNAHEAD) || defined(HAVE_NETWORKING)
-         if (runloop_st->request_fast_savestate)
+         /* Deprecated.
+            Use RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT instead. */
+         /* TODO/FIXME: Get rid of this ugly hack. */
+         if (runloop_st->request_special_savestate)
             result |= 4;
 #endif
          if (data)
@@ -3033,32 +3037,36 @@ bool runloop_environment_cb(unsigned cmd, void *data)
 
       case RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT:
       {
-         int result           = RETRO_SAVESTATE_CONTEXT_NORMAL;
+         int result = RETRO_SAVESTATE_CONTEXT_NORMAL;
+
 #if defined(HAVE_RUNAHEAD) || defined(HAVE_NETWORKING)
-         if (runloop_st->request_fast_savestate)
+         if (runloop_st->request_special_savestate)
          {
-#ifdef HAVE_RUNAHEAD
-#if defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB)
-            settings_t
-            *settings         = config_get_ptr();
-            result = (settings->bools.run_ahead_secondary_instance
-               && runloop_st->runahead_secondary_core_available
-               && secondary_core_ensure_exists(settings) ? RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_BINARY : RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_INSTANCE);
-#else
-            result = RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_INSTANCE;
-#endif
-#endif
 #ifdef HAVE_NETWORKING
             if (netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_ENABLED, NULL))
                result = RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY;
+            else
 #endif
+            {
+#ifdef HAVE_RUNAHEAD
+#if defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB)
+               settings_t *settings = config_get_ptr();
+
+               if (settings->bools.run_ahead_secondary_instance &&
+                     runloop_st->runahead_secondary_core_available &&
+                     secondary_core_ensure_exists(settings))
+                  result = RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_BINARY;
+               else
+#endif
+                  result = RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_INSTANCE;
+#endif
+            }
          }
 #endif
+
          if (data)
-         {
-            int* result_p = (int*)data;
-            *result_p = result;
-         }
+            *(int*)data = result;
+
          break;
       }
 
@@ -3389,13 +3397,14 @@ bool libretro_get_system_info(
 }
 
 /**
- * load_symbols:
+ * init_libretro_symbols_custom:
  * @type                        : Type of core to be loaded.
  *                                If CORE_TYPE_DUMMY, will
  *                                load dummy symbols.
  *
- * Setup libretro callback symbols. Returns true on success,
- * or false if symbols could not be loaded.
+ * Setup libretro callback symbols.
+ * 
+ * @return true on success, or false if symbols could not be loaded.
  **/
 static bool init_libretro_symbols_custom(
       runloop_state_t *runloop_st,
@@ -3505,8 +3514,9 @@ static bool init_libretro_symbols_custom(
  *                                load dummy symbols.
  *
  * Initializes libretro symbols and
- * setups environment callback functions. Returns true on success,
- * or false if symbols could not be loaded.
+ * setups environment callback functions.
+ *
+ * @return true on success, or false if symbols could not be loaded.
  **/
 static bool init_libretro_symbols(
       runloop_state_t *runloop_st,
@@ -3566,13 +3576,12 @@ void runloop_system_info_free(void)
 }
 
 /**
- * uninit_libretro_sym:
+ * uninit_libretro_symbols:
  *
  * Frees libretro core.
  *
- * Frees all core options,
- * associated state, and
- * unbind all libretro callback symbols.
+ * Frees all core options, associated state, and
+ * unbinds all libretro callback symbols.
  **/
 static void uninit_libretro_symbols(
       struct retro_core_t *current_core)
@@ -3933,7 +3942,7 @@ static char *copy_core_to_temp_file(
    if (!(tmpdir = get_tmpdir_alloc(dir_libretro)))
       return NULL;
 
-   fill_pathname_join(tmp_path,
+   fill_pathname_join_special(tmp_path,
          tmpdir, "retroarch_temp",
          sizeof(tmp_path));
 
@@ -4130,13 +4139,22 @@ bool secondary_core_ensure_exists(settings_t *settings)
 
 #if defined(HAVE_RUNAHEAD) && defined(HAVE_DYNAMIC)
 static bool secondary_core_deserialize(settings_t *settings,
-      const void *buffer, int size)
+      const void *data, size_t size)
 {
-   runloop_state_t *runloop_st   = &runloop_state;
+   bool ret = false;
+
    if (secondary_core_ensure_exists(settings))
-      return runloop_st->secondary_core.retro_unserialize(buffer, size);
-   runloop_secondary_core_destroy();
-   return false;
+   {
+      runloop_state_t *runloop_st = &runloop_state;
+
+      runloop_st->request_special_savestate = true;
+      ret = runloop_st->secondary_core.retro_unserialize(data, size);
+      runloop_st->request_special_savestate = false;
+   }
+   else
+      runloop_secondary_core_destroy();
+
+   return ret;
 }
 #endif
 
@@ -4612,9 +4630,7 @@ static bool runahead_create(runloop_state_t *runloop_st)
    retro_ctx_size_info_t info;
    video_driver_state_t *video_st           = video_state_get_ptr();
 
-   runloop_st->request_fast_savestate       = true;
-   core_serialize_size(&info);
-   runloop_st->request_fast_savestate       = false;
+   core_serialize_size_special(&info);
 
    runahead_save_state_list_init(runloop_st, info.size);
    video_st->runahead_is_active             = video_st->active;
@@ -4636,7 +4652,6 @@ static bool runahead_create(runloop_state_t *runloop_st)
 static bool runahead_save_state(runloop_state_t *runloop_st)
 {
    retro_ctx_serialize_info_t *serialize_info;
-   bool okay                       = false;
 
    if (!runloop_st->runahead_save_state_list)
       return false;
@@ -4644,11 +4659,7 @@ static bool runahead_save_state(runloop_state_t *runloop_st)
    serialize_info                  =
       (retro_ctx_serialize_info_t*)runloop_st->runahead_save_state_list->data[0];
 
-   runloop_st->request_fast_savestate = true;
-   okay                               = core_serialize(serialize_info);
-   runloop_st->request_fast_savestate = false;
-
-   if (okay)
+   if (core_serialize_special(serialize_info))
       return true;
 
    runahead_error(runloop_st);
@@ -4657,47 +4668,35 @@ static bool runahead_save_state(runloop_state_t *runloop_st)
 
 static bool runahead_load_state(runloop_state_t *runloop_st)
 {
-   bool okay                                  = false;
    retro_ctx_serialize_info_t *serialize_info = 
       (retro_ctx_serialize_info_t*)
       runloop_st->runahead_save_state_list->data[0];
    bool last_dirty                            = runloop_st->input_is_dirty;
+   bool ret                                   =
+      core_unserialize_special(serialize_info);
 
-   runloop_st->request_fast_savestate         = true;
-   /* calling core_unserialize has side effects with
-    * netplay (it triggers transmitting your save state)
-      call retro_unserialize directly from the core instead */
-   okay = runloop_st->current_core.retro_unserialize(
-         serialize_info->data_const, serialize_info->size);
-
-   runloop_st->request_fast_savestate         = false;
    runloop_st->input_is_dirty                 = last_dirty;
 
-   if (!okay)
+   if (!ret)
       runahead_error(runloop_st);
 
-   return okay;
+   return ret;
 }
 
 #if HAVE_DYNAMIC
 static bool runahead_load_state_secondary(void)
 {
-   bool okay                                  = false;
    runloop_state_t                *runloop_st = &runloop_state;
    settings_t                       *settings = config_get_ptr();
    retro_ctx_serialize_info_t *serialize_info =
       (retro_ctx_serialize_info_t*)runloop_st->runahead_save_state_list->data[0];
 
-   runloop_st->request_fast_savestate         = true;
-   okay                                       = 
-      secondary_core_deserialize(settings,
-         serialize_info->data_const, (int)serialize_info->size);
-   runloop_st->request_fast_savestate         = false;
-
-   if (!okay)
+   if (!secondary_core_deserialize(settings, serialize_info->data_const,
+         serialize_info->size))
    {
       runloop_st->runahead_secondary_core_available = false;
       runahead_error(runloop_st);
+
       return false;
    }
 
@@ -5430,6 +5429,7 @@ bool runloop_event_init_core(
       void *input_data,
       enum rarch_core_type type)
 {
+   size_t len;
    runloop_state_t *runloop_st     = &runloop_state;
    input_driver_state_t *input_st  = (input_driver_state_t*)input_data;
    video_driver_state_t *video_st  = video_state_get_ptr();
@@ -5485,18 +5485,17 @@ bool runloop_event_init_core(
    if (!sys_info->info.library_version)
       sys_info->info.library_version = "v0";
 
-   strlcpy(
+   len = strlcpy(
          video_st->title_buf,
          msg_hash_to_str(MSG_PROGRAM),
          sizeof(video_st->title_buf));
-   strlcat(video_st->title_buf,
-         " ",
-         sizeof(video_st->title_buf));
-   strlcat(video_st->title_buf,
+   video_st->title_buf[len  ] = ' ';
+   video_st->title_buf[len+1] = '\0';
+   len = strlcat(video_st->title_buf,
          sys_info->info.library_name,
          sizeof(video_st->title_buf));
-   strlcat(video_st->title_buf, " ",
-         sizeof(video_st->title_buf));
+   video_st->title_buf[len  ] = ' ';
+   video_st->title_buf[len+1] = '\0';
    strlcat(video_st->title_buf,
          sys_info->info.library_version,
          sizeof(video_st->title_buf));
@@ -5788,12 +5787,14 @@ bool runloop_path_init_subsystem(void)
    if (!retroarch_override_setting_is_set(
             RARCH_OVERRIDE_SETTING_SAVE_PATH, NULL))
    {
-      strlcpy(runloop_st->name.savefile,
+      size_t len = strlcpy(runloop_st->name.savefile,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.savefile));
-      strlcat(runloop_st->name.savefile,
-            ".srm",
-            sizeof(runloop_st->name.savefile));
+      runloop_st->name.savefile[len  ] = '.';
+      runloop_st->name.savefile[len+1] = 's';
+      runloop_st->name.savefile[len+2] = 'r';
+      runloop_st->name.savefile[len+3] = 'm';
+      runloop_st->name.savefile[len+4] = '\0';
    }
 
    if (path_is_directory(runloop_st->name.savefile))
@@ -5830,32 +5831,38 @@ void runloop_path_fill_names(void)
 
    if (string_is_empty(runloop_st->name.ups))
    {
-      strlcpy(runloop_st->name.ups,
+      size_t len = strlcpy(runloop_st->name.ups,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.ups));
-      strlcat(runloop_st->name.ups,
-            ".ups",
-            sizeof(runloop_st->name.ups));
+      runloop_st->name.ups[len  ] = '.';
+      runloop_st->name.ups[len+1] = 'u';
+      runloop_st->name.ups[len+2] = 'p';
+      runloop_st->name.ups[len+3] = 's';
+      runloop_st->name.ups[len+4] = '\0';
    }
 
    if (string_is_empty(runloop_st->name.bps))
    {
-      strlcpy(runloop_st->name.bps,
+      size_t len = strlcpy(runloop_st->name.bps,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.bps));
-      strlcat(runloop_st->name.bps,
-            ".bps",
-            sizeof(runloop_st->name.bps));
+      runloop_st->name.bps[len  ] = '.';
+      runloop_st->name.bps[len+1] = 'b';
+      runloop_st->name.bps[len+2] = 'p';
+      runloop_st->name.bps[len+3] = 's';
+      runloop_st->name.bps[len+4] = '\0';
    }
 
    if (string_is_empty(runloop_st->name.ips))
    {
-      strlcpy(runloop_st->name.ips,
+      size_t len = strlcpy(runloop_st->name.ips,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.ips));
-      strlcat(runloop_st->name.ips,
-            ".ips",
-            sizeof(runloop_st->name.ips));
+      runloop_st->name.ips[len  ] = '.';
+      runloop_st->name.ips[len+1] = 'i';
+      runloop_st->name.ips[len+2] = 'p';
+      runloop_st->name.ips[len+3] = 's';
+      runloop_st->name.ips[len+4] = '\0';
    }
 }
 
@@ -8374,11 +8381,31 @@ bool core_unserialize(retro_ctx_serialize_info_t *info)
    if (!info || !runloop_st->current_core.retro_unserialize(info->data_const, info->size))
       return false;
 
-#if HAVE_NETWORKING
+#ifdef HAVE_NETWORKING
    netplay_driver_ctl(RARCH_NETPLAY_CTL_LOAD_SAVESTATE, info);
 #endif
 
    return true;
+}
+
+bool core_unserialize_special(retro_ctx_serialize_info_t *info)
+{
+   bool ret;
+   runloop_state_t *runloop_st = &runloop_state;
+
+   if (!info)
+      return false;
+
+   runloop_st->request_special_savestate = true;
+   ret = runloop_st->current_core.retro_unserialize(info->data_const, info->size);
+   runloop_st->request_special_savestate = false;
+
+#ifdef HAVE_NETWORKING
+   if (ret)
+      netplay_driver_ctl(RARCH_NETPLAY_CTL_LOAD_SAVESTATE, info);
+#endif
+
+   return ret;
 }
 
 bool core_serialize(retro_ctx_serialize_info_t *info)
@@ -8389,12 +8416,41 @@ bool core_serialize(retro_ctx_serialize_info_t *info)
    return true;
 }
 
+bool core_serialize_special(retro_ctx_serialize_info_t *info)
+{
+   bool ret;
+   runloop_state_t *runloop_st = &runloop_state;
+
+   if (!info)
+      return false;
+
+   runloop_st->request_special_savestate = true;
+   ret = runloop_st->current_core.retro_serialize(info->data, info->size);
+   runloop_st->request_special_savestate = false;
+
+   return ret;
+}
+
 bool core_serialize_size(retro_ctx_size_info_t *info)
 {
    runloop_state_t *runloop_st  = &runloop_state;
    if (!info)
       return false;
    info->size = runloop_st->current_core.retro_serialize_size();
+   return true;
+}
+
+bool core_serialize_size_special(retro_ctx_size_info_t *info)
+{
+   runloop_state_t *runloop_st = &runloop_state;
+
+   if (!info)
+      return false;
+
+   runloop_st->request_special_savestate = true;
+   info->size = runloop_st->current_core.retro_serialize_size();
+   runloop_st->request_special_savestate = false;
+
    return true;
 }
 
@@ -8511,34 +8567,44 @@ void runloop_path_set_names(void)
    if (!retroarch_override_setting_is_set(
             RARCH_OVERRIDE_SETTING_SAVE_PATH, NULL))
    {
-      strlcpy(runloop_st->name.savefile,
+      size_t len = strlcpy(runloop_st->name.savefile,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.savefile));
-      strlcat(runloop_st->name.savefile,
-            ".srm",
-            sizeof(runloop_st->name.savefile));
+      runloop_st->name.savefile[len  ] = '.';
+      runloop_st->name.savefile[len+1] = 's';
+      runloop_st->name.savefile[len+2] = 'r';
+      runloop_st->name.savefile[len+3] = 'm';
+      runloop_st->name.savefile[len+4] = '\0';
    }
 
    if (!retroarch_override_setting_is_set(
             RARCH_OVERRIDE_SETTING_STATE_PATH, NULL))
    {
-      strlcpy(runloop_st->name.savestate,
+      size_t len                        = strlcpy(
+            runloop_st->name.savestate,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.savestate));
-      strlcat(runloop_st->name.savestate,
-            ".state",
-            sizeof(runloop_st->name.savestate));
+      runloop_st->name.savestate[len  ] = '.';
+      runloop_st->name.savestate[len+1] = 's';
+      runloop_st->name.savestate[len+2] = 't';
+      runloop_st->name.savestate[len+3] = 'a';
+      runloop_st->name.savestate[len+4] = 't';
+      runloop_st->name.savestate[len+5] = 'e';
+      runloop_st->name.savestate[len+6] = '\0';
    }
 
 #ifdef HAVE_CHEATS
    if (!string_is_empty(runloop_st->runtime_content_path_basename))
    {
-      strlcpy(runloop_st->name.cheatfile,
+      size_t len                        = strlcpy(
+            runloop_st->name.cheatfile,
             runloop_st->runtime_content_path_basename,
             sizeof(runloop_st->name.cheatfile));
-      strlcat(runloop_st->name.cheatfile,
-            ".cht",
-            sizeof(runloop_st->name.cheatfile));
+      runloop_st->name.cheatfile[len  ] = '.';
+      runloop_st->name.cheatfile[len+1] = 'c';
+      runloop_st->name.cheatfile[len+2] = 'h';
+      runloop_st->name.cheatfile[len+3] = 't';
+      runloop_st->name.cheatfile[len+4] = '\0';
    }
 #endif
 }

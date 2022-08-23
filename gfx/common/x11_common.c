@@ -203,25 +203,22 @@ static void xdg_screensaver_inhibit(Window wnd)
 {
    int  ret;
    char cmd[64];
+   char title[128];
 
-   cmd[0] = '\0';
+   cmd[0]   = '\0';
+   title[0] = '\0';
 
    RARCH_LOG("[X11]: Suspending screensaver (X11, xdg-screensaver).\n");
 
    if (g_x11_dpy && g_x11_win)
    {
-      char title[128];
-      size_t title_len;
       /* Make sure the window has a title, even if it's a bogus one, otherwise
        * xdg-screensaver will fail and report to stderr, framing RA for its bug.
        * A single space character is used so that the title bar stays visibly
        * the same, as if there's no title at all. */
-      video_driver_get_window_title(title, sizeof(title));
-      if ((title_len = strlen(title)) == 0)
-      {
-         title[0] = ' ';
-         title[1] = '\0';
-      }
+      size_t title_len = video_driver_get_window_title(title, sizeof(title));
+      if (title_len == 0)
+         title_len = strlcpy(title, " ", sizeof(title));
       XChangeProperty(g_x11_dpy, g_x11_win, XA_WM_NAME, XA_STRING,
             8, PropModeReplace, (const unsigned char*) title, title_len);
    }
@@ -386,7 +383,31 @@ static void x11_init_keyboard_lut(void)
       x11_keysym_rlut_size = 0;
 }
 
-bool x11_create_input_context(Display *dpy, Window win, XIM *xim, XIC *xic)
+static void x11_destroy_input_context(XIM *xim, XIC *xic)
+{
+   if (*xic)
+   {
+      XDestroyIC(*xic);
+      *xic = NULL;
+   }
+
+   if (*xim)
+   {
+      XCloseIM(*xim);
+      *xim = NULL;
+   }
+
+   memset(x11_keysym_lut, 0, sizeof(x11_keysym_lut));
+   if (x11_keysym_rlut)
+   {
+      free(x11_keysym_rlut);
+      x11_keysym_rlut = NULL;
+   }
+   x11_keysym_rlut_size = 0;
+}
+
+
+static bool x11_create_input_context(Display *dpy, Window win, XIM *xim, XIC *xic)
 {
    x11_destroy_input_context(xim, xic);
    x11_init_keyboard_lut();
@@ -411,29 +432,6 @@ bool x11_create_input_context(Display *dpy, Window win, XIM *xim, XIC *xic)
 
    XSetICFocus(*xic);
    return true;
-}
-
-void x11_destroy_input_context(XIM *xim, XIC *xic)
-{
-   if (*xic)
-   {
-      XDestroyIC(*xic);
-      *xic = NULL;
-   }
-
-   if (*xim)
-   {
-      XCloseIM(*xim);
-      *xim = NULL;
-   }
-
-   memset(x11_keysym_lut, 0, sizeof(x11_keysym_lut));
-   if (x11_keysym_rlut)
-   {
-      free(x11_keysym_rlut);
-      x11_keysym_rlut = NULL;
-   }
-   x11_keysym_rlut_size = 0;
 }
 
 bool x11_get_metrics(void *data,
@@ -767,6 +765,7 @@ bool x11_connect(void)
 void x11_update_title(void *data)
 {
    char title[128];
+   title[0] = '\0';
    video_driver_get_window_title(title, sizeof(title));
    if (title[0])
       XChangeProperty(g_x11_dpy, g_x11_win, XA_WM_NAME, XA_STRING,

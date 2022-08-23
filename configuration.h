@@ -124,6 +124,12 @@ typedef struct settings
       int video_window_offset_y;
 #endif
       int content_favorites_size;
+#ifdef _3DS
+      int bottom_font_color_red;
+      int bottom_font_color_green;
+      int bottom_font_color_blue;
+      int bottom_font_color_opacity;
+#endif
    } ints;
 
    struct
@@ -179,6 +185,8 @@ typedef struct settings
       unsigned netplay_port;
       unsigned netplay_max_connections;
       unsigned netplay_max_ping;
+      unsigned netplay_chat_color_name;
+      unsigned netplay_chat_color_msg;
       unsigned netplay_input_latency_frames_min;
       unsigned netplay_input_latency_frames_range;
       unsigned netplay_share_digital;
@@ -380,6 +388,9 @@ typedef struct settings
       float input_analog_deadzone;
       float input_axis_threshold;
       float input_analog_sensitivity;
+#ifdef _3DS
+      float bottom_font_scale;
+#endif
    } floats;
 
    struct
@@ -505,7 +516,9 @@ typedef struct settings
       char directory_menu_config[PATH_MAX_LENGTH];
       char directory_menu_content[PATH_MAX_LENGTH];
       char streaming_title[PATH_MAX_LENGTH];
-
+#ifdef _3DS
+      char directory_bottom_assets[PATH_MAX_LENGTH];
+#endif
       char log_dir[PATH_MAX_LENGTH];
    } paths;
 
@@ -550,7 +563,9 @@ typedef struct settings
       bool video_framecount_show;
       bool video_memory_show;
       bool video_msg_bgcolor_enable;
+#ifdef _3DS
       bool video_3ds_lcd_bottom;
+#endif
       bool video_wiiu_prefer_drc;
       bool video_notch_write_over_enable;
 #ifdef HAVE_VIDEO_LAYOUT
@@ -767,7 +782,6 @@ typedef struct settings
       bool netplay_allow_pausing;
       bool netplay_allow_slaves;
       bool netplay_require_slaves;
-      bool netplay_stateless_mode;
       bool netplay_nat_traversal;
       bool netplay_use_mitm_server;
       bool netplay_request_devices[MAX_USERS];
@@ -924,6 +938,7 @@ typedef struct settings
       bool gamemode_enable;
 #ifdef _3DS
       bool new3ds_speedup_enable;
+      bool bottom_font_enable;
 #endif
 
 #ifdef ANDROID

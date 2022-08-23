@@ -282,7 +282,7 @@ runtime_log_t *runtime_log_init(
     * If 'custom' runtime log path is undefined,
     * use default 'playlists/logs' directory... */
    if (string_is_empty(dir_runtime_log))
-      fill_pathname_join(
+      fill_pathname_join_special(
             tmp_buf,
             dir_playlist,
             "logs",
@@ -294,7 +294,7 @@ runtime_log_t *runtime_log_init(
       return NULL;
 
    if (log_per_core)
-      fill_pathname_join(
+      fill_pathname_join_special(
             log_file_dir,
             tmp_buf,
             core_name,
@@ -323,7 +323,10 @@ runtime_log_t *runtime_log_init(
        * no content is provided, 'content' is simply
        * the name of the core itself */
       if (supports_no_game)
+      {
          strlcpy(content_name, core_name, sizeof(content_name));
+         strlcat(content_name, ".lrtl", sizeof(content_name));
+      }
    }
    /* NOTE: TyrQuake requires a specific hack, since all
     * content has the same name... */
@@ -340,6 +343,7 @@ runtime_log_t *runtime_log_init(
                   content_path, path_length * sizeof(char));
             strlcpy(content_name,
                   path_basename(tmp_buf), sizeof(content_name));
+            strlcat(content_name, ".lrtl", sizeof(content_name));
          }
       }
    }
@@ -356,16 +360,15 @@ runtime_log_t *runtime_log_init(
          return NULL;
 
       strlcpy(content_name, tmp_buf_no_ext, sizeof(content_name));
+      strlcat(content_name, ".lrtl", sizeof(content_name));
    }
 
    if (string_is_empty(content_name))
       return NULL;
 
    /* Build final log file path */
-   fill_pathname_join(log_file_path, log_file_dir,
+   fill_pathname_join_special(log_file_path, log_file_dir,
          content_name, sizeof(log_file_path));
-   strlcat(log_file_path, FILE_PATH_RUNTIME_EXTENSION,
-         sizeof(log_file_path));
 
    if (string_is_empty(log_file_path))
       return NULL;
@@ -620,7 +623,8 @@ void runtime_log_get_last_played_time(runtime_log_t *runtime_log,
    mktime(time_info);
 }
 
-static void last_played_strftime(char *s, size_t len, const char *format,
+static void runtime_last_played_strftime(
+		char *s, size_t len, const char *format,
       const struct tm *timeptr)
 {
    char *local = NULL;
@@ -631,8 +635,7 @@ static void last_played_strftime(char *s, size_t len, const char *format,
    /* Generate string */
    strftime(s, len, format, timeptr);
 #if !(defined(__linux__) && !defined(ANDROID))
-   local = local_to_utf8_string_alloc(s);
-   if (local)
+   if ((local = local_to_utf8_string_alloc(s)))
    {
       if (!string_is_empty(local))
          strlcpy(s, local, len);
@@ -643,7 +646,7 @@ static void last_played_strftime(char *s, size_t len, const char *format,
 #endif
 }
 
-static void last_played_human(runtime_log_t *runtime_log,
+static bool runtime_last_played_human(runtime_log_t *runtime_log,
       char *str, size_t len)
 {
    struct tm time_info;
@@ -667,33 +670,30 @@ static void last_played_human(runtime_log_t *runtime_log,
    float periods[6] = {60.0f, 60.0f, 24.0f, 7.0f, 4.35f, 12.0f};
 
    if (!runtime_log)
-   {
-      strlcat(str, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PLAYLIST_INLINE_CORE_DISPLAY_NEVER), len);
-      return;
-   }
+      return false;
 
    /* Get time */
    runtime_log_get_last_played_time(runtime_log, &time_info);
 
    last_played = mktime(&time_info);
    current     = time(NULL);
-   delta       = current - last_played;
 
-   if (delta <= 0)
-   {
-      strlcat(str, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PLAYLIST_INLINE_CORE_DISPLAY_NEVER), len);
-      return;
-   }
+   if ((delta = current - last_played) <= 0)
+      return false;
 
    for (i = 0; delta >= periods[i] && i < sizeof(periods) - 1; i++)
       delta /= periods[i];
 
    /* Generate string */
    snprintf(tmp, sizeof(tmp), "%u %s",
-         (int)delta, msg_hash_to_str((delta == 1) ? units[i][0] : units[i][1]));
+         (int)delta, msg_hash_to_str((delta == 1) 
+            ? (enum msg_hash_enums)units[i][0] 
+            : (enum msg_hash_enums)units[i][1]));
    strlcat(str, tmp, len);
    strlcat(str, " ", len);
    strlcat(str, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_TIME_UNIT_AGO), len);
+
+   return true;
 }
 
 /* Gets last played entry value as a pre-formatted string */
@@ -850,7 +850,7 @@ void runtime_log_get_last_played_str(runtime_log_t *runtime_log,
             /* Get time */
             struct tm time_info;
             runtime_log_get_last_played_time(runtime_log, &time_info);
-            last_played_strftime(tmp, sizeof(tmp), format_str, &time_info);
+            runtime_last_played_strftime(tmp, sizeof(tmp), format_str, &time_info);
          }
          snprintf(str, len, "%s%s",
                msg_hash_to_str(
@@ -1133,7 +1133,11 @@ void runtime_log_get_last_played_str(runtime_log_t *runtime_log,
                   runtime_log->last_played.day, runtime_log->last_played.month);
             return;
          case PLAYLIST_LAST_PLAYED_STYLE_AGO:
-            last_played_human(runtime_log, tmp, sizeof(tmp));
+            if (!(runtime_last_played_human(runtime_log, tmp, sizeof(tmp))))
+               strlcat(tmp,
+                     msg_hash_to_str(
+                        MENU_ENUM_LABEL_VALUE_PLAYLIST_INLINE_CORE_DISPLAY_NEVER),
+                     sizeof(tmp));
             snprintf(str, len, "%s %s",
                   msg_hash_to_str(
                      MENU_ENUM_LABEL_VALUE_PLAYLIST_SUBLABEL_LAST_PLAYED),
@@ -1216,35 +1220,32 @@ void runtime_log_save(runtime_log_t *runtime_log)
    RARCH_LOG("[Runtime]: Saving runtime log file: \"%s\".\n", runtime_log->path);
 
    /* Attempt to open log file */
-   file = filestream_open(runtime_log->path,
-         RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
-
-   if (!file)
+   if (!(file = filestream_open(runtime_log->path,
+         RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE)))
    {
       RARCH_ERR("[Runtime]: Failed to open runtime log file: \"%s\".\n", runtime_log->path);
       return;
    }
 
    /* Initialise JSON writer */
-   writer = rjsonwriter_open_rfile(file);
-   if (!writer)
+   if (!(writer = rjsonwriter_open_rfile(file)))
    {
       RARCH_ERR("[Runtime]: Failed to create JSON writer.\n");
       goto end;
    }
 
    /* Write output file */
-   rjsonwriter_add_start_object(writer);
-   rjsonwriter_add_newline(writer);
+   rjsonwriter_raw(writer, "{", 1);
+   rjsonwriter_raw(writer, "\n", 1);
 
    /* > Version entry */
    rjsonwriter_add_spaces(writer, 2);
    rjsonwriter_add_string(writer, "version");
-   rjsonwriter_add_colon(writer);
-   rjsonwriter_add_space(writer);
+   rjsonwriter_raw(writer, ":", 1);
+   rjsonwriter_raw(writer, " ", 1);
    rjsonwriter_add_string(writer, "1.0");
-   rjsonwriter_add_comma(writer);
-   rjsonwriter_add_newline(writer);
+   rjsonwriter_raw(writer, ",", 1);
+   rjsonwriter_raw(writer, "\n", 1);
 
    /* > Runtime entry */
    snprintf(value_string,
@@ -1255,11 +1256,11 @@ void runtime_log_save(runtime_log_t *runtime_log)
     
    rjsonwriter_add_spaces(writer, 2);
    rjsonwriter_add_string(writer, "runtime");
-   rjsonwriter_add_colon(writer);
-   rjsonwriter_add_space(writer);
+   rjsonwriter_raw(writer, ":", 1);
+   rjsonwriter_raw(writer, " ", 1);
    rjsonwriter_add_string(writer, value_string);
-   rjsonwriter_add_comma(writer);
-   rjsonwriter_add_newline(writer);
+   rjsonwriter_raw(writer, ",", 1);
+   rjsonwriter_raw(writer, "\n", 1);
 
    /* > Last played entry */
    value_string[0] = '\0';
@@ -1272,14 +1273,14 @@ void runtime_log_save(runtime_log_t *runtime_log)
 
    rjsonwriter_add_spaces(writer, 2);
    rjsonwriter_add_string(writer, "last_played");
-   rjsonwriter_add_colon(writer);
-   rjsonwriter_add_space(writer);
+   rjsonwriter_raw(writer, ":", 1);
+   rjsonwriter_raw(writer, " ", 1);
    rjsonwriter_add_string(writer, value_string);
-   rjsonwriter_add_newline(writer);
+   rjsonwriter_raw(writer, "\n", 1);
 
    /* > Finalise */
-   rjsonwriter_add_end_object(writer);
-   rjsonwriter_add_newline(writer);
+   rjsonwriter_raw(writer, "}", 1);
+   rjsonwriter_raw(writer, "\n", 1);
 
    /* Free JSON writer */
    if (!rjsonwriter_free(writer))

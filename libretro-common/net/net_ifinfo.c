@@ -33,7 +33,7 @@
 
 #include <iphlpapi.h>
 
-#elif !defined(GEKKO)
+#elif !defined(VITA) && !defined(GEKKO)
 #if defined(WANT_IFADDRS)
 #include <compat/ifaddrs.h>
 #elif !defined(HAVE_LIBNX) && !defined(_3DS)
@@ -133,7 +133,7 @@ bool net_ifinfo_new(net_ifinfo_t *list)
 
       do
       {
-         if (getnameinfo(unicast_addr->Address.lpSockaddr,
+         if (getnameinfo_retro(unicast_addr->Address.lpSockaddr,
                unicast_addr->Address.iSockaddrLength,
                entry->host, sizeof(entry->host), NULL, 0, NI_NUMERICHOST))
             continue;
@@ -159,6 +159,30 @@ failure:
    net_ifinfo_free(list);
 
    return false;
+#elif defined(VITA)
+   SceNetCtlInfo info;
+
+   list->entries = (struct net_ifinfo_entry*)calloc(2, sizeof(*list->entries));
+   if (!list->entries)
+   {
+      list->size = 0;
+
+      return false;
+   }
+
+   strcpy_literal(list->entries[0].name, "lo");
+   strcpy_literal(list->entries[0].host, "127.0.0.1");
+   list->size = 1;
+
+   if (!sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &info))
+   {
+      strcpy_literal(list->entries[1].name, "wlan");
+      strlcpy(list->entries[1].host, info.ip_address,
+         sizeof(list->entries[1].host));
+      list->size++;
+   }
+
+   return true;
 #elif defined(HAVE_LIBNX) || defined(_3DS) || defined(GEKKO)
    uint32_t addr = 0;
 
@@ -280,7 +304,7 @@ failure:
             continue;
       }
 
-      if (getnameinfo(addr->ifa_addr, addrlen,
+      if (getnameinfo_retro(addr->ifa_addr, addrlen,
             entry->host, sizeof(entry->host), NULL, 0, NI_NUMERICHOST))
          continue;
 

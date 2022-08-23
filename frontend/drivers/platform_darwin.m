@@ -286,7 +286,10 @@ static void frontend_darwin_get_os(char *s, size_t len, int *major, int *minor)
 {
 #if defined(IOS)
    get_ios_version(major, minor);
-   strcpy_literal(s, "iOS");
+   s[0] = 'i';
+   s[1] = 'O';
+   s[2] = 'S';
+   s[3] = '\0';
 #elif defined(OSX)
 
 #if MAC_OS_X_VERSION_MIN_REQUIRED >= 101300 // MAC_OS_X_VERSION_10_13
@@ -319,13 +322,17 @@ static void frontend_darwin_get_os(char *s, size_t len, int *major, int *minor)
       Gestalt(gestaltSystemVersionMajor, (SInt32*)major);
    }
 #endif
-   strcpy_literal(s, "OSX");
+   s[0] = 'O';
+   s[1] = 'S';
+   s[2] = 'X';
+   s[3] = '\0';
 #endif
 }
 
 static void frontend_darwin_get_env(int *argc, char *argv[],
       void *args, void *params_data)
 {
+   char assets_zip_path[PATH_MAX_LENGTH];
    CFURLRef bundle_url;
    CFStringRef bundle_path;
    CFURLRef resource_url;
@@ -339,7 +346,7 @@ static void frontend_darwin_get_env(int *argc, char *argv[],
    char temp_dir[PATH_MAX_LENGTH]        = {0};
    char bundle_path_buf[PATH_MAX_LENGTH] = {0};
    char resource_path_buf[PATH_MAX_LENGTH] = {0};
-   char full_resource_path_buf[PATH_MAX_LENGTH] = {0};
+   char full_resource_path_buf[PATH_MAX_LENGTH];
    char home_dir_buf[PATH_MAX_LENGTH]    = {0};
    CFBundleRef bundle                    = CFBundleGetMainBundle();
 
@@ -359,7 +366,7 @@ static void frontend_darwin_get_env(int *argc, char *argv[],
    CFStringGetCString(resource_path,
          resource_path_buf, sizeof(resource_path_buf), kCFStringEncodingUTF8);
    CFRelease(resource_path);
-   fill_pathname_join(full_resource_path_buf, bundle_path_buf, resource_path_buf, sizeof(full_resource_path_buf));
+   fill_pathname_join_special(full_resource_path_buf, bundle_path_buf, resource_path_buf, sizeof(full_resource_path_buf));
    CFSearchPathForDirectoriesInDomains(
          home_dir_buf, sizeof(home_dir_buf));
 
@@ -454,20 +461,19 @@ static void frontend_darwin_get_env(int *argc, char *argv[],
 
 #endif
 
-    char assets_zip_path[PATH_MAX_LENGTH];
 #if TARGET_OS_IOS
     {
        int major, minor;
        get_ios_version(&major, &minor);
        if (major > 8)
-          strcpy_literal(g_defaults.path_buildbot_server_url, "http://buildbot.libretro.com/nightly/apple/ios9/latest/");
+          strlcpy(g_defaults.path_buildbot_server_url, "http://buildbot.libretro.com/nightly/apple/ios9/latest/", sizeof(g_defaults.path_buildbot_server_url));
     }
 #endif
 
 #if TARGET_OS_IOS
-    fill_pathname_join(assets_zip_path, bundle_path_buf, "assets.zip", sizeof(assets_zip_path));
+    fill_pathname_join_special(assets_zip_path, bundle_path_buf, "assets.zip", sizeof(assets_zip_path));
 #else
-    fill_pathname_join(assets_zip_path, full_resource_path_buf, "assets.zip", sizeof(assets_zip_path));
+    fill_pathname_join_special(assets_zip_path, full_resource_path_buf, "assets.zip", sizeof(assets_zip_path));
 #endif
 
     if (path_is_valid(assets_zip_path))

@@ -551,10 +551,6 @@ MSG_HASH(
    "中央處理器功能"
    )
 MSG_HASH( /* FIXME Colon should be handled in menu_display.c like the rest */
-   MENU_ENUM_LABEL_VALUE_CPU_ARCHITECTURE,
-   "中央處理器架構:"
-   )
-MSG_HASH( /* FIXME Colon should be handled in menu_display.c like the rest */
    MENU_ENUM_LABEL_VALUE_CPU_CORES,
    "中央處理器核心:"
    )
@@ -2725,6 +2721,8 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MENU_SETTINGS,
    "選單"
    )
+#ifdef _3DS
+#endif
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SHOW_ADVANCED_SETTINGS,
    "顯示高級設定"
@@ -2909,10 +2907,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_NETPLAY_SPECTATE_PASSWORD,
    "伺服器圍觀的密碼"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_NETPLAY_STATELESS_MODE,
-   "連線遊戲無狀態模式"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_NETPLAY_CHECK_FRAMES,
@@ -4848,14 +4842,6 @@ MSG_HASH(
    "你已做為玩家 %u 加入"
    )
 MSG_HASH(
-   MSG_NETPLAY_ENDIAN_DEPENDENT,
-   "這個核心模擬器不支援不同系統的網路連線對戰"
-   )
-MSG_HASH(
-   MSG_NETPLAY_PLATFORM_DEPENDENT,
-   "此模擬器且不支援此兩種架構下的連線遊戲模式"
-   )
-MSG_HASH(
    MSG_NETPLAY_ENTER_PASSWORD,
    "輸入連線遊戲伺服器的密碼："
    )
@@ -5934,7 +5920,7 @@ MSG_HASH(
 #ifdef HAVE_ODROIDGO2
 #else
 #endif
-#if defined(_3DS)
+#ifdef _3DS
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_3DS_LCD_BOTTOM,
    "3DS 底部螢幕"

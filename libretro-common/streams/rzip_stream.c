@@ -620,11 +620,15 @@ char* rzipstream_gets(rzipstream_t *stream, char *s, size_t len)
       c = rzipstream_getc(stream);
 
       /* Check for newline and EOF */
-      if ((c == '\n') || (c == EOF))
+      if (c == EOF)
          break;
 
       /* Copy character to string buffer */
       *str_ptr++ = c;
+
+      /* Check for newline and EOF */
+      if (c == '\n')
+          break;
    }
 
    /* Add NUL termination */
@@ -1019,7 +1023,9 @@ int64_t rzipstream_tell(rzipstream_t *stream)
    if (!stream)
       return -1;
 
-   return (int64_t)stream->virtual_ptr;
+   if (stream->is_compressed)
+      return (int64_t)stream->virtual_ptr;
+   return filestream_tell(stream->file);
 }
 
 /* Returns true if specified RZIP file contains

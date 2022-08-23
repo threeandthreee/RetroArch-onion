@@ -1872,7 +1872,6 @@ ifeq ($(HAVE_BUILTINGLSLANG), 1)
       $(wildcard $(DEPS_DIR)/glslang/glslang/glslang/MachineIndependent/*.cpp) \
       $(wildcard $(DEPS_DIR)/glslang/glslang/glslang/MachineIndependent/preprocessor/*.cpp) \
       $(DEPS_DIR)/glslang/glslang/glslang/OSDependent/$(GLSLANG_PLATFORM)/ossource.cpp
-
    ifneq ($(findstring Win32,$(OS)),)
       DEFINES += -DENABLE_HLSL
       GLSLANG_SOURCES += $(wildcard $(DEPS_DIR)/glslang/glslang/hlsl/*.cpp)
@@ -1893,6 +1892,7 @@ endif
 
 ifeq ($(HAVE_GLSLANG_COMMON), 1)
    DEFINES += -DHAVE_GLSLANG
+   OBJ += $(GLSLANG_SOURCES_C:.c=.o)
    OBJ += $(GLSLANG_SOURCES:.cpp=.o)
 endif
 
@@ -2124,7 +2124,8 @@ ifeq ($(HAVE_NETWORKING), 1)
       OBJ += $(LIBRETRO_COMM_DIR)/net/net_socket_ssl_mbed.o
    endif
 
-   ifneq ($(HAVE_SOCKET_LEGACY),1)
+   ifeq ($(HAVE_IFINFO), 1)
+      DEFINES += -DHAVE_IFINFO
       OBJ += $(LIBRETRO_COMM_DIR)/net/net_ifinfo.o
    endif
 

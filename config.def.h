@@ -976,13 +976,17 @@ static const float message_bgcolor_opacity = 1.0f;
  * Used for setups where one manually rotates the monitor. */
 #define DEFAULT_ALLOW_ROTATE true
 
-#if defined(_3DS)
+#ifdef _3DS
 /* Enable New3DS clock and L2 cache */
 static const bool new3ds_speedup_enable      = true;
 /* Enable bottom LCD screen */
 static const bool video_3ds_lcd_bottom       = true;
 /* Sets video display mode (3D, 2D, etc.) */
 static const unsigned video_3ds_display_mode = CTR_VIDEO_MODE_3D;
+
+#define DEFAULT_BOTTOM_FONT_ENABLE true
+#define DEFAULT_BOTTOM_FONT_COLOR 255
+#define DEFAULT_BOTTOM_FONT_SCALE 1.48
 #endif
 
 #ifdef WIIU
@@ -1215,6 +1219,10 @@ static const bool netplay_start_as_spectator = false;
 /* Netplay chat fading toggle */
 static const bool netplay_fade_chat = true;
 
+/* Netplay chat colors */
+static const unsigned netplay_chat_color_name = 0x008000;
+static const unsigned netplay_chat_color_msg  = 0xFFFFFF;
+
 /* Allow players to pause */
 static const bool netplay_allow_pausing = false;
 
@@ -1223,9 +1231,6 @@ static const bool netplay_allow_slaves = true;
 
 /* Require connections only in slave mode */
 static const bool netplay_require_slaves = false;
-
-/* Netplay without savestates/rewind */
-static const bool netplay_stateless_mode = false;
 
 /* When being client over netplay, use keybinds for
  * user 1 rather than user 2. */
@@ -1283,8 +1288,7 @@ static const bool savestate_thumbnail_enable = false;
 
 /* When creating save state files, compress
  * written data */
-#if defined(__WINRT__) || defined(WINAPI_FAMILY) && WINAPI_FAMILY == WINAPI_FAMILY_PHONE_APP
-/* TODO/FIXME Apparently this is an issue on UWP for now, so disable it for now */
+#if defined(WINAPI_FAMILY) && WINAPI_FAMILY == WINAPI_FAMILY_PHONE_APP
 #define DEFAULT_SAVESTATE_FILE_COMPRESSION false
 #else
 #define DEFAULT_SAVESTATE_FILE_COMPRESSION true

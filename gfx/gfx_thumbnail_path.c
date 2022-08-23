@@ -254,7 +254,12 @@ bool gfx_thumbnail_set_system(gfx_thumbnail_path_data_t *path_data,
    /* Hack: There is only one MAME thumbnail repo,
     * so filter any input starting with 'MAME...' */
    if (strncmp(system, "MAME", 4) == 0)
-      strlcpy(path_data->system, "MAME", sizeof(path_data->system));
+   {
+      path_data->system[0] = path_data->system[2] = 'M';
+      path_data->system[1] = 'A';
+      path_data->system[3] = 'E';
+      path_data->system[4] = '\0';
+   }
    else
       strlcpy(path_data->system, system, sizeof(path_data->system));
    
@@ -400,7 +405,7 @@ bool gfx_thumbnail_set_content_image(
             path_data->content_img, sizeof(path_data->content_label));
    
    /* Set file path */
-   fill_pathname_join(path_data->content_path,
+   fill_pathname_join_special(path_data->content_path,
       img_dir, img_name, sizeof(path_data->content_path));
    
    /* Set core name to "imageviewer" */
@@ -508,8 +513,12 @@ bool gfx_thumbnail_set_content_playlist(
       /* Hack: There is only one MAME thumbnail repo,
        * so filter any input starting with 'MAME...' */
       if (strncmp(db_name, "MAME", 4) == 0)
-         strlcpy(path_data->content_db_name, "MAME",
-               sizeof(path_data->content_db_name));
+      {
+         path_data->content_db_name[0] = path_data->content_db_name[2] = 'M';
+         path_data->content_db_name[1] = 'A';
+         path_data->content_db_name[3] = 'E';
+         path_data->content_db_name[4] = '\0';
+      }
       else
       {
          char *db_name_no_ext = NULL;
@@ -636,15 +645,15 @@ bool gfx_thumbnail_update_path(
       /* > Normal content: assemble path */
       
       /* >> Base + system name */
-      fill_pathname_join(thumbnail_path, dir_thumbnails,
+      fill_pathname_join_special(thumbnail_path, dir_thumbnails,
             system_name, PATH_MAX_LENGTH * sizeof(char));
       
       /* >> Add type */
-      fill_pathname_join(tmp_buf, thumbnail_path, type, sizeof(tmp_buf));
+      fill_pathname_join_special(tmp_buf, thumbnail_path, type, sizeof(tmp_buf));
       
       /* >> Add content image */
       thumbnail_path[0] = '\0';
-      fill_pathname_join(thumbnail_path, tmp_buf,
+      fill_pathname_join_special(thumbnail_path, tmp_buf,
             path_data->content_img, PATH_MAX_LENGTH * sizeof(char));
    }
    

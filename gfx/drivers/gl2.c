@@ -3332,9 +3332,10 @@ static bool gl2_resolve_extensions(gl2_t *gl, const char *context_ident, const v
    if (gl->core_context_in_use)
    {
 #ifdef GL_NUM_EXTENSIONS
+      GLint i;
       GLint exts = 0;
       glGetIntegerv(GL_NUM_EXTENSIONS, &exts);
-      for (GLint i = 0; i < exts; i++)
+      for (i = 0; i < exts; i++)
       {
          const char *ext = (const char*)glGetStringi(GL_EXTENSIONS, i);
          if (ext)
@@ -3726,8 +3727,9 @@ static void *gl2_init(const video_info_t *video,
 
       if (!string_is_empty(vendor))
       {
-        strlcpy(device_str, vendor, sizeof(device_str));
-        strlcat(device_str, " ", sizeof(device_str));
+        size_t len        = strlcpy(device_str, vendor, sizeof(device_str));
+        device_str[len  ] = ' ';
+        device_str[len+1] = '\0';
       }
 
       if (!string_is_empty(renderer))

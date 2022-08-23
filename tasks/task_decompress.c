@@ -55,7 +55,7 @@ static int file_decompressed_subdir(const char *name,
 
    name += strlen(userdata->dec->subdir) + 1;
 
-   fill_pathname_join(path,
+   fill_pathname_join_special(path,
          userdata->dec->target_dir, name, sizeof(path));
    fill_pathname_basedir(path_dir, path, sizeof(path_dir));
 
@@ -89,13 +89,13 @@ static int file_decompressed(const char *name, const char *valid_exts,
    if (last_char == '/' || last_char == '\\')
       return 1;
    /* Make directory */
-   fill_pathname_join(path, dec->target_dir, name, sizeof(path));
+   fill_pathname_join_special(path, dec->target_dir, name, sizeof(path));
    path_basedir_wrapper(path);
 
    if (!path_mkdir(path))
       goto error;
 
-   fill_pathname_join(path, dec->target_dir, name, sizeof(path));
+   fill_pathname_join_special(path, dec->target_dir, name, sizeof(path));
 
    if (!file_archive_perform_mode(path, valid_exts,
             cdata, cmode, csize, size, crc32, userdata))
@@ -290,7 +290,7 @@ void *task_push_decompress(
    if (!(s = (decompress_state_t*)calloc(1, sizeof(*s))))
       return NULL;
 
-   if (!(t = (retro_task_t*)calloc(1, sizeof(*t))))
+   if (!(t = task_init()))
    {
       free(s);
       return NULL;

@@ -215,9 +215,6 @@ void gfx_widgets_msg_queue_push(
 
          msg_widget                             = (disp_widget_msg_t*)malloc(sizeof(*msg_widget));
 
-         if (task)
-            title                               = task->title;
-
          msg_widget->msg                        = NULL;
          msg_widget->msg_new                    = NULL;
          msg_widget->msg_transition_animation   = 0.0f;
@@ -237,7 +234,6 @@ void gfx_widgets_msg_queue_push(
          msg_widget->expiration_timer_started   = false;
 
          msg_widget->task_ptr                   = task;
-         msg_widget->task_title_ptr             = NULL;
          msg_widget->task_count                 = 0;
 
          msg_widget->task_progress              = 0;
@@ -262,7 +258,7 @@ void gfx_widgets_msg_queue_push(
 
          if (task)
          {
-            msg_widget->msg                     = strdup(title);
+            title = msg_widget->msg             = strdup(task->title);
             msg_widget->msg_new                 = strdup(title);
             msg_widget->msg_len                 = (unsigned)strlen(title);
 
@@ -271,7 +267,6 @@ void gfx_widgets_msg_queue_push(
             msg_widget->task_finished           = task->finished;
             msg_widget->task_progress           = task->progress;
             msg_widget->task_ident              = task->ident;
-            msg_widget->task_title_ptr          = task->title;
             msg_widget->task_count              = 1;
 
             msg_widget->unfolded                = true;
@@ -303,10 +298,9 @@ void gfx_widgets_msg_queue_push(
                   title_length,
                   1);
             msg_widget->text_height             = p_dispwidget->gfx_widget_fonts.msg_queue.line_height;
-
-            msg_len = title_length + 1 + 1; /* 1 byte uses for inserting '\n' */
-            msg = (char *)malloc(msg_len);
-            if (!msg)
+            /* 1 byte uses for inserting '\n' */
+            msg_len                             = title_length + 1 + 1;
+            if (!(msg = (char *)malloc(msg_len)))
                return;
             msg[0] = '\0';
 
@@ -319,7 +313,8 @@ void gfx_widgets_msg_queue_push(
                if ((text_width - (text_width >> 2)) < width)
                   width = text_width - (text_width >> 2);
 
-               word_wrap(msg, msg_len, title, (title_length * width) / text_width,
+               word_wrap(msg, msg_len, title, title_length,
+                     (title_length * width) / text_width,
                      100, 2);
 
                msg_widget->text_height *= 2;
@@ -351,12 +346,7 @@ void gfx_widgets_msg_queue_push(
 
          if (!string_is_equal(task->title, msg_widget->msg_new))
          {
-            unsigned len         = (unsigned)strlen(task->title);
-            unsigned new_width   = font_driver_get_message_width(
-                  p_dispwidget->gfx_widget_fonts.msg_queue.font,
-                  task->title,
-                  len,
-                  1);
+            unsigned len, new_width;
 
             if (msg_widget->msg_new)
             {
@@ -364,9 +354,16 @@ void gfx_widgets_msg_queue_push(
                msg_widget->msg_new                 = NULL;
             }
 
-            msg_widget->msg_new                    = strdup(task->title);
+            title       = msg_widget->msg_new      = strdup(task->title);
+
+            len         = (unsigned)strlen(title);
+            new_width   = font_driver_get_message_width(
+                  p_dispwidget->gfx_widget_fonts.msg_queue.font,
+                  title,
+                  len,
+                  1);
+
             msg_widget->msg_len                    = len;
-            msg_widget->task_title_ptr             = task->title;
             msg_widget->msg_transition_animation   = 0;
 
             if (!task->alternative_look)
@@ -795,44 +792,33 @@ static void gfx_widgets_layout(
    /* Initialise fonts */
    if (string_is_empty(font_path))
    {
-      char ozone_path[PATH_MAX_LENGTH];
       char font_file[PATH_MAX_LENGTH];
-      /* Base path */
-      fill_pathname_join(ozone_path, dir_assets, "ozone", sizeof(ozone_path));
       /* Create regular font */
-      fill_pathname_join(font_file, ozone_path, "regular.ttf", sizeof(font_file));
       gfx_widgets_font_init(p_disp, p_dispwidget,
             &p_dispwidget->gfx_widget_fonts.regular,
-            is_threaded, font_file, BASE_FONT_SIZE);
-
+            is_threaded, p_dispwidget->ozone_regular_font_path, BASE_FONT_SIZE);
       /* Create bold font */
-      fill_pathname_join(font_file, ozone_path, "bold.ttf", sizeof(font_file));
       gfx_widgets_font_init(p_disp, p_dispwidget,
             &p_dispwidget->gfx_widget_fonts.bold,
-            is_threaded, font_file, BASE_FONT_SIZE);
+            is_threaded, p_dispwidget->ozone_bold_font_path, BASE_FONT_SIZE);
 
       /* Create msg_queue font */
       switch (*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE))
       {
          case RETRO_LANGUAGE_ARABIC:
          case RETRO_LANGUAGE_PERSIAN:
-            fill_pathname_application_special(font_file, sizeof(font_file),
-                  APPLICATION_SPECIAL_DIRECTORY_ASSETS_PKG);
-            fill_pathname_join(font_file, font_file, "fallback-font.ttf", sizeof(font_file));
+            fill_pathname_join_special(font_file, p_dispwidget->assets_pkg_dir, "fallback-font.ttf", sizeof(font_file));
             break;
          case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
          case RETRO_LANGUAGE_CHINESE_TRADITIONAL:
-            fill_pathname_application_special(font_file, sizeof(font_file),
-                  APPLICATION_SPECIAL_DIRECTORY_ASSETS_PKG);
-            fill_pathname_join(font_file, font_file, "chinese-fallback-font.ttf", sizeof(font_file));
+            fill_pathname_join_special(font_file, p_dispwidget->assets_pkg_dir, "chinese-fallback-font.ttf", sizeof(font_file));
             break;
          case RETRO_LANGUAGE_KOREAN:
-            fill_pathname_application_special(font_file, sizeof(font_file),
-                  APPLICATION_SPECIAL_DIRECTORY_ASSETS_PKG);
-            fill_pathname_join(font_file, font_file, "korean-fallback-font.ttf", sizeof(font_file));
+            fill_pathname_join_special(font_file, p_dispwidget->assets_pkg_dir, "korean-fallback-font.ttf", sizeof(font_file));
             break;
          default:
-            fill_pathname_join(font_file, ozone_path, "regular.ttf", sizeof(font_file));
+            strlcpy(font_file, p_dispwidget->ozone_regular_font_path, sizeof(font_file));
+            break;
       }
       gfx_widgets_font_init(p_disp, p_dispwidget,
             &p_dispwidget->gfx_widget_fonts.msg_queue,
@@ -1178,9 +1164,9 @@ static void gfx_widgets_draw_task_msg(
    float *msg_queue_current_background;
    float *msg_queue_current_bar;
 
+   char task_percentage[256];
    bool draw_msg_new                 = false;
    unsigned task_percentage_offset   = 0;
-   char task_percentage[256]         = {0};
 
    if (msg->msg_new)
       draw_msg_new                   = !string_is_equal(msg->msg_new, msg->msg);
@@ -1193,13 +1179,19 @@ static void gfx_widgets_draw_task_msg(
    if (msg->task_finished)
    {
       if (msg->task_error)
-         strcpy_literal(task_percentage, "Task failed");
+         strlcpy(task_percentage, "Task failed", sizeof(task_percentage));
       else
-         strcpy_literal(task_percentage, " ");
+      {
+         task_percentage[0] = ' ';
+         task_percentage[1] = '\0';
+      }
    }
    else if (msg->task_progress >= 0 && msg->task_progress <= 100)
+   {
+      task_percentage[0] = '\0';
       snprintf(task_percentage, sizeof(task_percentage),
             "%i%%", msg->task_progress);
+   }
 
    rect_width = p_dispwidget->simple_widget_padding 
       + msg->width 
@@ -1890,34 +1882,6 @@ static void gfx_widgets_context_reset(
       const char *dir_assets, char *font_path)
 {
    size_t i;
-   char xmb_path[PATH_MAX_LENGTH];
-   char monochrome_png_path[PATH_MAX_LENGTH];
-   char gfx_widgets_path[PATH_MAX_LENGTH];
-   char theme_path[PATH_MAX_LENGTH];
-   fill_pathname_join(
-      gfx_widgets_path,
-      dir_assets,
-      "menu_widgets",
-      sizeof(gfx_widgets_path)
-   );
-   fill_pathname_join(
-      xmb_path,
-      dir_assets,
-      "xmb",
-      sizeof(xmb_path)
-   );
-   fill_pathname_join(
-      theme_path,
-      xmb_path,
-      "monochrome",
-      sizeof(theme_path)
-   );
-   fill_pathname_join(
-      monochrome_png_path,
-      theme_path,
-      "png",
-      sizeof(monochrome_png_path)
-   );
 
    /* Load textures */
    /* Icons */
@@ -1925,7 +1889,7 @@ static void gfx_widgets_context_reset(
    {
       gfx_display_reset_textures_list(
             gfx_widgets_icons_names[i],
-            monochrome_png_path,
+            p_dispwidget->monochrome_png_path,
             &p_dispwidget->gfx_widgets_icons_textures[i],
             TEXTURE_FILTER_MIPMAP_LINEAR,
             NULL,
@@ -1935,21 +1899,21 @@ static void gfx_widgets_context_reset(
    /* Message queue */
    gfx_display_reset_textures_list(
          "msg_queue_icon.png",
-         gfx_widgets_path,
+         p_dispwidget->gfx_widgets_path,
          &p_dispwidget->msg_queue_icon,
          TEXTURE_FILTER_LINEAR,
          NULL,
          NULL);
    gfx_display_reset_textures_list(
          "msg_queue_icon_outline.png",
-         gfx_widgets_path,
+         p_dispwidget->gfx_widgets_path,
          &p_dispwidget->msg_queue_icon_outline,
          TEXTURE_FILTER_LINEAR,
          NULL,
          NULL);
    gfx_display_reset_textures_list(
          "msg_queue_icon_rect.png",
-         gfx_widgets_path,
+         p_dispwidget->gfx_widgets_path,
          &p_dispwidget->msg_queue_icon_rect,
          TEXTURE_FILTER_NEAREST,
          NULL,
@@ -1967,7 +1931,8 @@ static void gfx_widgets_context_reset(
       if (widget->context_reset)
          widget->context_reset(is_threaded, width, height,
                fullscreen, dir_assets, font_path,
-               monochrome_png_path, gfx_widgets_path);
+               p_dispwidget->monochrome_png_path,
+               p_dispwidget->gfx_widgets_path);
    }
 
    /* Update scaling/dimensions */
@@ -2035,6 +2000,7 @@ bool gfx_widgets_init(
 
    if (!p_dispwidget->inited)
    {
+      char theme_path[PATH_MAX_LENGTH];
       p_dispwidget->gfx_widgets_frame_count = 0;
 
       for (i = 0; i < ARRAY_SIZE(widgets); i++)
@@ -2055,6 +2021,45 @@ bool gfx_widgets_init(
 #ifdef HAVE_THREADS
       p_dispwidget->current_msgs_lock = slock_new();
 #endif
+
+      fill_pathname_join_special(
+            p_dispwidget->gfx_widgets_path,
+            dir_assets,
+            "menu_widgets",
+            sizeof(p_dispwidget->gfx_widgets_path)
+            );
+      fill_pathname_join_special(
+            p_dispwidget->xmb_path,
+            dir_assets,
+            "xmb",
+            sizeof(p_dispwidget->xmb_path)
+            );
+      /* Base path */
+      fill_pathname_join_special(p_dispwidget->ozone_path,
+            dir_assets,
+            "ozone",
+            sizeof(p_dispwidget->ozone_path));
+      fill_pathname_join_special(p_dispwidget->ozone_regular_font_path,
+            p_dispwidget->ozone_path, "regular.ttf",
+            sizeof(p_dispwidget->ozone_regular_font_path));
+      fill_pathname_join_special(p_dispwidget->ozone_bold_font_path,
+            p_dispwidget->ozone_path, "bold.ttf",
+            sizeof(p_dispwidget->ozone_bold_font_path));
+      fill_pathname_join_special(
+            theme_path,
+            p_dispwidget->xmb_path,
+            "monochrome",
+            sizeof(theme_path)
+            );
+      fill_pathname_join_special(
+            p_dispwidget->monochrome_png_path,
+            theme_path,
+            "png",
+            sizeof(p_dispwidget->monochrome_png_path)
+            );
+      fill_pathname_join_special(p_dispwidget->assets_pkg_dir,
+            settings->paths.directory_assets, "pkg",
+            sizeof(p_dispwidget->assets_pkg_dir));
 
       p_dispwidget->inited = true;
    }
