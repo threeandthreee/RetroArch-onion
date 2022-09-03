@@ -1651,9 +1651,9 @@ int generic_action_ok_displaylist_push(const char *path,
          info_path          = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_CONTENT_SETTINGS);
          info_label         = msg_hash_to_str(MENU_ENUM_LABEL_CONTENT_SETTINGS);
          info.enum_idx      = MENU_ENUM_LABEL_CONTENT_SETTINGS;
-         menu_entries_append_enum(menu_stack, info_path, info_label,
+         menu_entries_append(menu_stack, info_path, info_label,
                MENU_ENUM_LABEL_CONTENT_SETTINGS,
-               0, 0, 0);
+               0, 0, 0, NULL);
          dl_type            = DISPLAYLIST_CONTENT_SETTINGS;
          break;
    }
@@ -8027,11 +8027,10 @@ static int menu_cbs_init_bind_ok_compare_label(menu_file_list_cbs_t *cbs,
                   STRLEN_CONST("input_binds_list")))
          {
             unsigned i;
+            unsigned first_char = atoi(&str[0]);
 
             for (i = 0; i < MAX_USERS; i++)
             {
-               unsigned first_char = atoi(&str[0]);
-
                if (first_char != ((i+1)))
                   continue;
 

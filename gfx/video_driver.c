@@ -669,9 +669,17 @@ void video_monitor_set_refresh_rate(float hz)
 {
    char msg[128];
    settings_t        *settings = config_get_ptr();
-
-   snprintf(msg, sizeof(msg),
-         "Setting refresh rate to: %.3f Hz.", hz);
+   /* TODO/FIXME - localize */
+   size_t _len = strlcpy(msg, "Setting refresh rate to", sizeof(msg));
+   msg[_len  ] = ':';
+   msg[++_len] = ' ';
+   msg[++_len] = '\0';
+   _len       += snprintf(msg + _len, sizeof(msg) - _len, "%.3f", hz);
+   msg[_len  ] = ' ';
+   msg[_len+1] = 'H';
+   msg[_len+2] = 'z';
+   msg[_len+3] = '.';
+   msg[_len+4] = '\0';
    if (settings->bools.notification_show_refresh_rate)
       runloop_msg_queue_push(msg, 1, 180, false, NULL,
             MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
@@ -982,11 +990,11 @@ void recording_dump_frame(
       if (  vp.width  != record_st->gpu_width ||
             vp.height != record_st->gpu_height)
       {
-         RARCH_WARN("[Recording]: %s\n",
-               msg_hash_to_str(MSG_RECORDING_TERMINATED_DUE_TO_RESIZE));
+         const char *recording_failed_str =
+            msg_hash_to_str(MSG_RECORDING_TERMINATED_DUE_TO_RESIZE);
+         RARCH_WARN("[Recording]: %s\n", recording_failed_str);
 
-         runloop_msg_queue_push(
-               msg_hash_to_str(MSG_RECORDING_TERMINATED_DUE_TO_RESIZE),
+         runloop_msg_queue_push(recording_failed_str,
                1, 180, true,
                NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
          command_event(CMD_EVENT_RECORD_DEINIT, NULL);
@@ -3614,7 +3622,7 @@ void video_driver_frame(const void *data, unsigned width,
    bool render_frame             = true;
    retro_time_t new_time;
    video_frame_info_t video_info;
-   size_t buf_pos                = 1;
+   size_t buf_pos                = 0;
    video_driver_state_t *video_st= &video_driver_st;
    runloop_state_t *runloop_st   = runloop_state_get_ptr();
    const enum retro_pixel_format
@@ -3744,13 +3752,20 @@ void video_driver_frame(const void *data, unsigned width,
       fps_time                                     = new_time;
 
       if (video_info.fps_show)
-         buf_pos = snprintf(
-               status_text, sizeof(status_text),
-               "FPS: %6.2f", last_fps);
+      {
+         status_text[0] = 'F';
+         status_text[1] = 'P';
+         status_text[2] = 'S';
+         status_text[3] = ':';
+         status_text[4] = ' ';
+         status_text[5] = '\0';
+         buf_pos        = snprintf(
+               status_text + 5, sizeof(status_text) - 5,
+               "%6.2f", last_fps) + 5;
+      }
 
       if (video_info.framecount_show)
       {
-         char frames_text[64];
          if (status_text[buf_pos-1] != '\0')
          {
             status_text[buf_pos  ] = ' ';
@@ -3759,36 +3774,45 @@ void video_driver_frame(const void *data, unsigned width,
             status_text[buf_pos+3] = ' ';
             status_text[buf_pos+4] = '\0';
          }
-         snprintf(frames_text,
-               sizeof(frames_text),
-               "%s: %" PRIu64, msg_hash_to_str(MSG_FRAMES),
-               (uint64_t)video_st->frame_count);
-         buf_pos = strlcat(status_text, frames_text, sizeof(status_text));
+         buf_pos                   = strlcat(status_text, msg_hash_to_str(MSG_FRAMES),
+			 sizeof(status_text));
+         status_text[buf_pos  ]    = ':';
+         status_text[++buf_pos]    = ' ';
+         status_text[++buf_pos]    = '\0';
+         buf_pos                  += snprintf(
+		status_text         + buf_pos,
+		sizeof(status_text) - buf_pos,
+		"%" PRIu64, (uint64_t)video_st->frame_count);
       }
 
       if (video_info.memory_show)
       {
-         char mem[128];
-
          if ((video_st->frame_count % memory_update_interval) == 0)
          {
             last_total_memory = frontend_driver_get_total_memory();
             last_used_memory  = last_total_memory - frontend_driver_get_free_memory();
          }
 
-         mem[0] = '\0';
-         snprintf(
-               mem, sizeof(mem), "MEM: %.2f/%.2fMB", last_used_memory / (1024.0f * 1024.0f),
-               last_total_memory / (1024.0f * 1024.0f));
          if (status_text[buf_pos-1] != '\0')
          {
-            status_text[buf_pos  ] = ' ';
-            status_text[buf_pos+1] = '|';
-            status_text[buf_pos+2] = '|';
-            status_text[buf_pos+3] = ' ';
-            status_text[buf_pos+4] = '\0';
+            status_text[buf_pos]   = ' ';
+            status_text[++buf_pos] = '|';
+            status_text[++buf_pos] = '|';
+            status_text[++buf_pos] = ' ';
+            status_text[++buf_pos] = '\0';
          }
-         buf_pos = strlcat(status_text, mem, sizeof(status_text));
+         status_text[buf_pos  ]    = 'M';
+         status_text[++buf_pos]    = 'E';
+         status_text[++buf_pos]    = 'M';
+         status_text[++buf_pos]    = ':';
+         status_text[++buf_pos]    = ' ';
+         status_text[++buf_pos]    = '\0';
+         buf_pos                  += snprintf(
+               status_text + buf_pos, sizeof(status_text) - buf_pos, "%.2f/%.2f", last_used_memory / (1024.0f * 1024.0f),
+               last_total_memory / (1024.0f * 1024.0f));
+         status_text[buf_pos  ]   = 'M';
+         status_text[++buf_pos]   = 'B';
+         status_text[++buf_pos]   = '\0';
       }
 
       if ((video_st->frame_count % fps_update_interval) == 0)

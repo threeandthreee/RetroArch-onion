@@ -260,7 +260,7 @@ void gfx_widgets_msg_queue_push(
          {
             title = msg_widget->msg             = strdup(task->title);
             msg_widget->msg_new                 = strdup(title);
-            msg_widget->msg_len                 = (unsigned)strlen(title);
+            msg_widget->msg_len                 = strlen(title);
 
             msg_widget->task_error              = !string_is_empty(task->error);
             msg_widget->task_cancelled          = task->cancelled;
@@ -274,7 +274,7 @@ void gfx_widgets_msg_queue_push(
             msg_widget->width                   = font_driver_get_message_width(
                   p_dispwidget->gfx_widget_fonts.msg_queue.font,
                   title,
-                  msg_widget->msg_len, 1) +
+                  msg_widget->msg_len, 1.0f) +
                   p_dispwidget->simple_widget_padding / 2;
 
             task->frontend_userdata             = msg_widget;
@@ -286,7 +286,7 @@ void gfx_widgets_msg_queue_push(
             /* Compute rect width, wrap if necessary */
             /* Single line text > two lines text > two lines 
              * text with expanded width */
-            unsigned title_length               = (unsigned)strlen(title);
+            size_t title_length                 = strlen(title);
             char *msg                           = NULL;
             size_t msg_len                      = 0;
             unsigned width                      = menu_is_alive 
@@ -296,7 +296,7 @@ void gfx_widgets_msg_queue_push(
                   p_dispwidget->gfx_widget_fonts.msg_queue.font,
                   title,
                   title_length,
-                  1);
+                  1.0f);
             msg_widget->text_height             = p_dispwidget->gfx_widget_fonts.msg_queue.line_height;
             /* 1 byte uses for inserting '\n' */
             msg_len                             = title_length + 1 + 1;
@@ -326,7 +326,7 @@ void gfx_widgets_msg_queue_push(
             }
 
             msg_widget->msg                     = msg;
-            msg_widget->msg_len                 = (unsigned)strlen(msg);
+            msg_widget->msg_len                 = strlen(msg);
             msg_widget->width                   = width + 
                p_dispwidget->simple_widget_padding / 2;
          }
@@ -346,7 +346,8 @@ void gfx_widgets_msg_queue_push(
 
          if (!string_is_equal(task->title, msg_widget->msg_new))
          {
-            unsigned len, new_width;
+            size_t len;
+            unsigned new_width;
 
             if (msg_widget->msg_new)
             {
@@ -356,12 +357,12 @@ void gfx_widgets_msg_queue_push(
 
             title       = msg_widget->msg_new      = strdup(task->title);
 
-            len         = (unsigned)strlen(title);
+            len         = strlen(title);
             new_width   = font_driver_get_message_width(
                   p_dispwidget->gfx_widget_fonts.msg_queue.font,
                   title,
                   len,
-                  1);
+                  1.0f);
 
             msg_widget->msg_len                    = len;
             msg_widget->msg_transition_animation   = 0;
@@ -1107,9 +1108,11 @@ static int gfx_widgets_draw_indicator(
       unsigned height       = p_dispwidget->simple_widget_height;
       const char *txt       = msg_hash_to_str(msg);
 
-      width = font_driver_get_message_width(p_dispwidget->gfx_widget_fonts.regular.font,
+      width = font_driver_get_message_width(
+            p_dispwidget->gfx_widget_fonts.regular.font,
             txt,
-            (unsigned)strlen(txt), 1) + p_dispwidget->simple_widget_padding * 2;
+            strlen(txt), 1.0f) 
+         + p_dispwidget->simple_widget_padding * 2;
 
       gfx_display_draw_quad(
             p_disp,
@@ -1628,7 +1631,7 @@ void gfx_widgets_frame(void *data)
       int text_width        = font_driver_get_message_width(
             p_dispwidget->gfx_widget_fonts.regular.font,
             text,
-            (unsigned)strlen(text), 1.0f);
+            strlen(text), 1.0f);
       int total_width       = text_width
          + p_dispwidget->simple_widget_padding * 2;
 

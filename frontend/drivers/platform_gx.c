@@ -43,6 +43,7 @@
 #include <defines/gx_defines.h>
 
 #include <boolean.h>
+#include <compat/strl.h>
 
 #include <file/file_path.h>
 #ifndef IS_SALAMANDER
@@ -130,6 +131,8 @@ static void gx_devthread(void *a)
 {
    unsigned i;
 
+   slock_lock(gx_device_cond_mutex);
+
    while (!gx_stop_dev_thread)
    {
       slock_lock(gx_device_mutex);
@@ -141,9 +144,9 @@ static void gx_devthread(void *a)
             if (!gx_devices[i].interface->isInserted())
             {
                char n[8] = {0};
-
                gx_devices[i].mounted = false;
-               snprintf(n, sizeof(n), "%s:", gx_devices[i].name);
+               strlcpy(n, gx_devices[i].name, sizeof(n));
+               strlcat(n, ":", sizeof(n));
                fatUnmount(n);
             }
          }
@@ -152,11 +155,10 @@ static void gx_devthread(void *a)
       }
 
       slock_unlock(gx_device_mutex);
-
-      slock_lock(gx_device_cond_mutex);
       scond_wait_timeout(gx_device_cond, gx_device_cond_mutex, 1000000);
-      slock_unlock(gx_device_cond_mutex);
    }
+
+   slock_unlock(gx_device_cond_mutex);
 }
 #endif
 
@@ -215,8 +217,8 @@ static void frontend_gx_get_env(int *argc, char *argv[],
          /* When using external loaders (Wiiflow, etc),
             getcwd doesn't return the path correctly and as a result,
             the cfg file is not found. */
-         if (string_starts_with(argv[0], "usb1") ||
-               string_starts_with(argv[0], "usb2"))
+         if (  string_starts_with_size(argv[0], "usb1", STRLEN_CONST("usb1")) ||
+               string_starts_with_size(argv[0], "usb2", STRLEN_CONST("usb2")))
          {
             strcpy_literal(g_defaults.dirs[DEFAULT_DIR_CORE], "usb");
             strlcat(g_defaults.dirs[DEFAULT_DIR_CORE], argv[0] + 4,
@@ -521,27 +523,27 @@ static int frontend_gx_parse_drive_list(void *data, bool load_content)
       MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR :
       MENU_ENUM_LABEL_FILE_BROWSER_DIRECTORY;
 #ifdef HW_RVL
-   menu_entries_append_enum(list,
+   menu_entries_append(list,
          "sd:/",
          msg_hash_to_str(MSG_EXTERNAL_APPLICATION_DIR),
          enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
-   menu_entries_append_enum(list,
+         FILE_TYPE_DIRECTORY, 0, 0, NULL);
+   menu_entries_append(list,
          "usb:/",
          msg_hash_to_str(MSG_EXTERNAL_APPLICATION_DIR),
          enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
+         FILE_TYPE_DIRECTORY, 0, 0, NULL);
 #endif
-   menu_entries_append_enum(list,
+   menu_entries_append(list,
          "carda:/",
          msg_hash_to_str(MSG_EXTERNAL_APPLICATION_DIR),
          enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
-   menu_entries_append_enum(list,
+         FILE_TYPE_DIRECTORY, 0, 0, NULL);
+   menu_entries_append(list,
          "cardb:/",
          msg_hash_to_str(MSG_EXTERNAL_APPLICATION_DIR),
          enum_idx,
-         FILE_TYPE_DIRECTORY, 0, 0);
+         FILE_TYPE_DIRECTORY, 0, 0, NULL);
 #endif
 
    return 0;

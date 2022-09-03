@@ -133,9 +133,10 @@ static const char *gfx_thumbnail_get_type(
    unsigned        type          = 0;
    unsigned gfx_thumbnails       = settings->uints.gfx_thumbnails;
    unsigned menu_left_thumbnails = settings->uints.menu_left_thumbnails;
+   const char *val_off           = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF);
    
    if (!path_data)
-      return msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF);
+      return val_off;
    
    switch (thumbnail_id)
    {
@@ -152,7 +153,7 @@ static const char *gfx_thumbnail_get_type(
             type = menu_left_thumbnails;
          break;
       default:
-         return msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF);
+         return val_off;
    }
    
    switch (type)
@@ -168,7 +169,7 @@ static const char *gfx_thumbnail_get_type(
          break;
    }
    
-   return msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF);
+   return val_off;
 }
 
 /* Returns true if specified thumbnail is enabled
@@ -318,9 +319,9 @@ bool gfx_thumbnail_set_system(gfx_thumbnail_path_data_t *path_data,
    return true;
 }
 
-/* Sets current thumbnail content according to the specified label.
+/* Sets current thumbnail content according to the specified label and optional database name.
  * Returns true if content is valid */
-bool gfx_thumbnail_set_content(gfx_thumbnail_path_data_t *path_data, const char *label)
+bool gfx_thumbnail_set_content(gfx_thumbnail_path_data_t *path_data, const char *label, const char *db_name)
 {
    if (!path_data)
       return false;
@@ -353,6 +354,10 @@ bool gfx_thumbnail_set_content(gfx_thumbnail_path_data_t *path_data, const char 
    /* Have to set content path to *something*...
     * Just use label value (it doesn't matter) */
    strlcpy(path_data->content_path, label, sizeof(path_data->content_path));
+
+   /* Database name required for Explore thumbnails */
+   if (!string_is_empty(db_name))
+      strlcpy(path_data->content_db_name, db_name, sizeof(path_data->content_db_name));
    
    /* Redundant error check... */
    return !string_is_empty(path_data->content_img);

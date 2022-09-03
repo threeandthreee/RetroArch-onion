@@ -604,21 +604,7 @@ int64_t retro_vfs_file_tell_impl(libretro_vfs_implementation_file *stream)
 int64_t retro_vfs_file_seek_impl(libretro_vfs_implementation_file *stream,
       int64_t offset, int seek_position)
 {
-   int whence = -1;
-   switch (seek_position)
-   {
-      case RETRO_VFS_SEEK_POSITION_START:
-         whence = SEEK_SET;
-         break;
-      case RETRO_VFS_SEEK_POSITION_CURRENT:
-         whence = SEEK_CUR;
-         break;
-      case RETRO_VFS_SEEK_POSITION_END:
-         whence = SEEK_END;
-         break;
-   }
-
-   return retro_vfs_file_seek_internal(stream, offset, whence);
+   return retro_vfs_file_seek_internal(stream, offset, seek_position);
 }
 
 int64_t retro_vfs_file_read_impl(libretro_vfs_implementation_file *stream,
@@ -1015,7 +1001,6 @@ libretro_vfs_implementation_dir *retro_vfs_opendir_impl(
       const char *name, bool include_hidden)
 {
 #if defined(_WIN32)
-   unsigned path_len;
    char path_buf[1024];
    size_t copied      = 0;
 #if defined(LEGACY_WIN32)
@@ -1026,7 +1011,7 @@ libretro_vfs_implementation_dir *retro_vfs_opendir_impl(
 #endif
    libretro_vfs_implementation_dir *rdir;
 
-   /*Reject null or empty string paths*/
+   /* Reject NULL or empty string paths*/
    if (!name || (*name == 0))
       return NULL;
 
@@ -1038,16 +1023,13 @@ libretro_vfs_implementation_dir *retro_vfs_opendir_impl(
    rdir->orig_path       = strdup(name);
 
 #if defined(_WIN32)
-   path_buf[0]           = '\0';
-   path_len              = strlen(name);
-
    copied                = strlcpy(path_buf, name, sizeof(path_buf));
 
    /* Non-NT platforms don't like extra slashes in the path */
-   if (name[path_len - 1] != '\\')
-      path_buf[copied++]   = '\\';
+   if (path_buf[copied - 1] != '\\')
+      path_buf [copied++]  = '\\';
 
-   path_buf[copied]        = '*';
+   path_buf[copied  ]      = '*';
    path_buf[copied+1]      = '\0';
 
 #if defined(LEGACY_WIN32)
