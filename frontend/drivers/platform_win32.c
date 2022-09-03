@@ -23,7 +23,6 @@
 #include <windows.h>
 #if defined(_WIN32) && !defined(_XBOX)
 #include <process.h>
-#include <errno.h>
 #endif
 
 #include <boolean.h>
@@ -556,11 +555,11 @@ static int frontend_win32_parse_drive_list(void *data, bool load_content)
    {
       drive[0] = 'A' + i;
       if (drives & (1 << i))
-         menu_entries_append_enum(list,
+         menu_entries_append(list,
                drive,
                msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
                enum_idx,
-               FILE_TYPE_DIRECTORY, 0, 0);
+               FILE_TYPE_DIRECTORY, 0, 0, NULL);
    }
 #endif
 

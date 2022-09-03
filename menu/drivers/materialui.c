@@ -2665,7 +2665,7 @@ static void materialui_render_messagebox(
       if (!string_is_empty(line))
       {
          int width     = font_driver_get_message_width(
-               mui->font_data.list.font, line, (unsigned)strlen(line), 1);
+               mui->font_data.list.font, line, strlen(line), 1.0f);
          longest_width = (width > longest_width) ?
                width : longest_width;
       }
@@ -3478,14 +3478,21 @@ static bool materialui_render_process_entry_playlist_desktop(
                last_played_str = mui->status_bar.last_played_fallback_str;
 
             /* Generate metadata string */
-            snprintf(mui->status_bar.str, sizeof(mui->status_bar.str),
-                  "%s %s%s%s%s%s",
+            strlcpy(mui->status_bar.str,
                   msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PLAYLIST_SUBLABEL_CORE),
-                  core_name,
-                  MUI_TICKER_SPACER,
-                  runtime_str,
-                  MUI_TICKER_SPACER,
-                  last_played_str);
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, " ",
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, core_name,
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, MUI_TICKER_SPACER,
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, runtime_str,
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, MUI_TICKER_SPACER,
+                  sizeof(mui->status_bar.str));
+            strlcat(mui->status_bar.str, last_played_str,
+                  sizeof(mui->status_bar.str));
 
             /* All metadata is cached */
             mui->status_bar.cached = true;
@@ -4036,9 +4043,11 @@ static void materialui_render_menu_entry_default(
          if (!entry->checked)
             icon_texture = mui->textures.list[node->icon_texture_index];
          break;
+#if defined(HAVE_LIBRETRODB)
       case MUI_ICON_TYPE_MENU_EXPLORE:
          icon_texture = menu_explore_get_entry_icon(entry_type);
          break;
+#endif
       case MUI_ICON_TYPE_MENU_CONTENTLESS_CORE:
          icon_texture = menu_contentless_cores_get_entry_icon(entry->label);
          break;
@@ -5653,7 +5662,7 @@ static void materialui_render_header(
                font_driver_get_message_width(
                   mui->font_data.hint.font,
                   mui->sys_bar_cache.battery_percent_str,
-                  (unsigned)strlen(mui->sys_bar_cache.battery_percent_str),
+                  strlen(mui->sys_bar_cache.battery_percent_str),
                   1.0f);
          }
 
@@ -5746,7 +5755,7 @@ static void materialui_render_header(
             = font_driver_get_message_width(
                mui->font_data.hint.font,
                mui->sys_bar_cache.timedate_str,
-               (unsigned)strlen(mui->sys_bar_cache.timedate_str),
+               strlen(mui->sys_bar_cache.timedate_str),
                1.0f);
       }
 
@@ -7048,11 +7057,10 @@ static void materialui_frame(void *data, video_frame_info_t *video_info)
    /* Handle onscreen keyboard */
    if (menu_input_dialog_get_display_kb())
    {
+      size_t _len;
       char msg[255];
       const char *str   = menu_input_dialog_get_buffer();
       const char *label = menu_input_dialog_get_label_buffer();
-
-      msg[0] = '\0';
 
       /* Darken screen */
       gfx_display_set_alpha(
@@ -7069,7 +7077,10 @@ static void materialui_frame(void *data, video_frame_info_t *video_info)
             NULL);
 
       /* Draw message box */
-      snprintf(msg, sizeof(msg), "%s\n%s", label, str);
+      _len        = strlcpy(msg, label, sizeof(msg));
+      msg[_len  ] = '\n';
+      msg[_len+1] = '\0';
+      strlcat(msg, str, sizeof(msg));
       materialui_render_messagebox(mui,
             p_disp,
             userdata, video_width, video_height,
@@ -7400,6 +7411,7 @@ static void materialui_status_bar_init(
 
    if (mui->status_bar.enabled)
    {
+      size_t _len;
       /* Determine status bar height */
       mui->status_bar.height = (unsigned)(((float)mui->font_data.hint.line_height * 1.6f) + 0.5f);
 
@@ -7408,15 +7420,25 @@ static void materialui_status_bar_init(
        *  materialui_init()? Because re-caching the
        *  values each time allows us to handle changes
        *  in user interface language settings) */
-      snprintf(mui->status_bar.runtime_fallback_str,
-            sizeof(mui->status_bar.runtime_fallback_str), "%s %s",
+      _len = strlcpy(mui->status_bar.runtime_fallback_str,
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PLAYLIST_SUBLABEL_RUNTIME),
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED));
+	    sizeof(mui->status_bar.runtime_fallback_str));
+      mui->status_bar.runtime_fallback_str[_len  ] = ' ';
+      mui->status_bar.runtime_fallback_str[_len+1] = '\0';
+      strlcat(mui->status_bar.runtime_fallback_str,
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED),
+	    sizeof(mui->status_bar.runtime_fallback_str));
 
-      snprintf(mui->status_bar.last_played_fallback_str,
-            sizeof(mui->status_bar.last_played_fallback_str), "%s %s",
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PLAYLIST_SUBLABEL_LAST_PLAYED),
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED));
+      _len = strlcpy(mui->status_bar.last_played_fallback_str,
+            msg_hash_to_str(
+               MENU_ENUM_LABEL_VALUE_PLAYLIST_SUBLABEL_LAST_PLAYED),
+            sizeof(mui->status_bar.last_played_fallback_str));
+      mui->status_bar.last_played_fallback_str[_len  ] = ' ';
+      mui->status_bar.last_played_fallback_str[_len+1] = '\0';
+      strlcat(mui->status_bar.last_played_fallback_str,
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED),
+            sizeof(mui->status_bar.last_played_fallback_str)
+            );
    }
 }
 
@@ -7789,7 +7811,7 @@ static void materialui_init_font(
    {
       /* Calculate a more realistic ticker_limit */
       int char_width =
-         font_driver_get_message_width(font_data->font, str_latin, 1, 1);
+         font_driver_get_message_width(font_data->font, str_latin, 1, 1.0f);
 
       if (char_width > 0)
          font_data->glyph_width = (unsigned)char_width;
@@ -7799,7 +7821,7 @@ static void materialui_init_font(
       if (wideglyph_str)
       {
          int wideglyph_width =
-            font_driver_get_message_width(font_data->font, wideglyph_str, (unsigned)strlen(wideglyph_str), 1);
+            font_driver_get_message_width(font_data->font, wideglyph_str, strlen(wideglyph_str), 1.0f);
 
          if (wideglyph_width > 0 && char_width > 0) 
             font_data->wideglyph_width = wideglyph_width * 100 / char_width;
@@ -9304,33 +9326,33 @@ static int materialui_list_push(void *data, void *userdata,
          {
             menu_entries_ctl(MENU_ENTRIES_CTL_CLEAR, info->list);
 
-            menu_entries_append_enum(info->list,
+            menu_entries_append(info->list,
                   msg_hash_to_str(MENU_ENUM_LABEL_VALUE_FAVORITES),
                   msg_hash_to_str(MENU_ENUM_LABEL_FAVORITES),
                   MENU_ENUM_LABEL_FAVORITES,
-                  MENU_SETTING_ACTION_FAVORITES_DIR, 0, 0);
+                  MENU_SETTING_ACTION_FAVORITES_DIR, 0, 0, NULL);
 
             core_info_get_list(&list);
             if (list->info_count > 0)
             {
-               menu_entries_append_enum(info->list,
+               menu_entries_append(info->list,
                      msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DOWNLOADED_FILE_DETECT_CORE_LIST),
                      msg_hash_to_str(MENU_ENUM_LABEL_DOWNLOADED_FILE_DETECT_CORE_LIST),
                      MENU_ENUM_LABEL_DOWNLOADED_FILE_DETECT_CORE_LIST,
-                     MENU_SETTING_ACTION, 0, 0);
+                     MENU_SETTING_ACTION, 0, 0, NULL);
             }
 
             if (frontend_driver_parse_drive_list(info->list, true) != 0)
-               menu_entries_append_enum(info->list, "/",
+               menu_entries_append(info->list, "/",
                      msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
                      MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR,
-                     MENU_SETTING_ACTION, 0, 0);
+                     MENU_SETTING_ACTION, 0, 0, NULL);
 
-            menu_entries_append_enum(info->list,
+            menu_entries_append(info->list,
                   msg_hash_to_str(MENU_ENUM_LABEL_VALUE_MENU_FILE_BROWSER_SETTINGS),
                   msg_hash_to_str(MENU_ENUM_LABEL_MENU_FILE_BROWSER_SETTINGS),
                   MENU_ENUM_LABEL_MENU_FILE_BROWSER_SETTINGS,
-                  MENU_SETTING_ACTION, 0, 0);
+                  MENU_SETTING_ACTION, 0, 0, NULL);
 
             info->need_push    = true;
             info->need_refresh = true;
@@ -10740,8 +10762,8 @@ static void materialui_list_insert(
                {
                   char val[255];
                   unsigned user_value = i + 1;
-
-                  snprintf(val, sizeof(val), "%d_input_binds_list", user_value);
+                  snprintf(val, sizeof(val), "%d", user_value);
+                  strlcat(val, "_input_binds_list", sizeof(val));
 
                   if (string_is_equal(label, val))
                   {

@@ -1363,13 +1363,13 @@ static void load_timezone(char *setting)
 
       char *start = strstr(haystack, needle);
 
-      if (start != NULL)
+      if (start)
          snprintf(setting, TIMEZONE_LENGTH, "%s", start + needle_len);
       else
-         snprintf(setting, TIMEZONE_LENGTH, "%s", DEFAULT_TIMEZONE);
+         strlcpy(setting, DEFAULT_TIMEZONE, TIMEZONE_LENGTH);
    }
    else
-      snprintf(setting, TIMEZONE_LENGTH, "%s", DEFAULT_TIMEZONE);
+      strlcpy(setting, DEFAULT_TIMEZONE, TIMEZONE_LENGTH);
 
    config_set_timezone(setting);
 }
@@ -3353,10 +3353,8 @@ static bool config_load_file(global_t *global,
    for (i = 0; i < MAX_USERS; i++)
    {
       char tmp[64];
-
-      tmp[0] = '\0';
-
-      snprintf(tmp, sizeof(tmp), "network_remote_enable_user_p%u", i + 1);
+      size_t _len = strlcpy(tmp, "network_remote_enable_user_p", sizeof(tmp));
+      snprintf(tmp + _len, sizeof(tmp) - _len, "%u", i + 1);
 
       if (config_get_bool(conf, tmp, &tmp_bool))
          configuration_set_bool(settings,
@@ -3424,11 +3422,10 @@ static bool config_load_file(global_t *global,
    {
       char buf[64];
       char prefix[24];
-
+      size_t _len;
       buf[0]    = '\0';
-      prefix[0] = '\0';
-
-      snprintf(prefix, sizeof(prefix),"input_player%u", i + 1);
+      _len      = strlcpy(prefix, "input_player", sizeof(prefix));
+      snprintf(prefix + _len, sizeof(prefix) - _len, "%u", i + 1);
 
       strlcpy(buf, prefix, sizeof(buf));
       strlcat(buf, "_joypad_index", sizeof(buf));
@@ -3647,6 +3644,12 @@ static bool config_load_file(global_t *global,
       *settings->paths.directory_core_assets = '\0';
    if (string_is_equal(settings->paths.directory_assets, "default"))
       *settings->paths.directory_assets = '\0';
+#ifdef _3DS
+   if (string_is_equal(settings->paths.directory_bottom_assets, "default"))
+         configuration_set_string(settings,
+               settings->paths.directory_bottom_assets,
+               g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]);
+#endif
    if (string_is_equal(settings->paths.directory_dynamic_wallpapers, "default"))
       *settings->paths.directory_dynamic_wallpapers = '\0';
    if (string_is_equal(settings->paths.directory_thumbnails, "default"))
@@ -3899,7 +3902,7 @@ bool config_load_override(void *data)
 
    /* per-core overrides */
    /* Create a new config file from core_path */
-   if (config_file_exists(core_path))
+   if (path_is_valid(core_path))
    {
       RARCH_LOG("[Overrides]: Core-specific overrides found at \"%s\".\n",
             core_path);
@@ -3913,7 +3916,7 @@ bool config_load_override(void *data)
    {
       /* per-content-dir overrides */
       /* Create a new config file from content_path */
-      if (config_file_exists(content_path))
+      if (path_is_valid(content_path))
       {
          char tmp_path[PATH_MAX_LENGTH + 1];
 
@@ -3940,7 +3943,7 @@ bool config_load_override(void *data)
 
       /* per-game overrides */
       /* Create a new config file from game_path */
-      if (config_file_exists(game_path))
+      if (path_is_valid(game_path))
       {
          char tmp_path[PATH_MAX_LENGTH + 1];
 
@@ -4207,33 +4210,34 @@ static void save_keybind_hat(config_file_t *conf, const char *key,
 {
    char config[16];
    unsigned hat     = (unsigned)GET_HAT(bind->joykey);
-   const char *dir  = NULL;
 
-   config[0]        = '\0';
+   config[0]        = 'h';
+   config[1]        = '\0';
+
+   snprintf(config + 1, sizeof(config) - 1, "%u", hat); 
 
    switch (GET_HAT_DIR(bind->joykey))
    {
       case HAT_UP_MASK:
-         dir = "up";
+         strlcat(config, "up", sizeof(config));
          break;
 
       case HAT_DOWN_MASK:
-         dir = "down";
+         strlcat(config, "down", sizeof(config));
          break;
 
       case HAT_LEFT_MASK:
-         dir = "left";
+         strlcat(config, "left", sizeof(config));
          break;
 
       case HAT_RIGHT_MASK:
-         dir = "right";
+         strlcat(config, "right", sizeof(config));
          break;
 
       default:
          break;
    }
 
-   snprintf(config, sizeof(config), "h%u%s", hat, dir);
    config_set_string(conf, key, config);
 }
 
@@ -4284,15 +4288,19 @@ static void save_keybind_axis(config_file_t *conf,
    else if (AXIS_NEG_GET(bind->joyaxis) != AXIS_DIR_NONE)
    {
       char config[16];
-      config[0] = '\0';
-      snprintf(config, sizeof(config), "-%u", AXIS_NEG_GET(bind->joyaxis));
+      config[0] = '-';
+      config[1] = '\0';
+      snprintf(config + 1, sizeof(config) - 1, "%u",
+            AXIS_NEG_GET(bind->joyaxis));
       config_set_string(conf, key, config);
    }
    else if (AXIS_POS_GET(bind->joyaxis) != AXIS_DIR_NONE)
    {
       char config[16];
-      config[0] = '\0';
-      snprintf(config, sizeof(config), "+%u", AXIS_POS_GET(bind->joyaxis));
+      config[0] = '+';
+      config[1] = '\0';
+      snprintf(config + 1, sizeof(config) - 1, "%u",
+            AXIS_POS_GET(bind->joyaxis));
       config_set_string(conf, key, config);
    }
 }
@@ -4697,16 +4705,26 @@ bool config_save_file(const char *path)
    for (i = 0; i < MAX_USERS; i++)
    {
       char cfg[64];
+      char formatted_number[4];
 
-      cfg[0] = '\0';
+      formatted_number[0] = '\0';
 
-      snprintf(cfg, sizeof(cfg), "input_device_p%u", i + 1);
+      snprintf(formatted_number, sizeof(formatted_number), "%u", i + 1);
+
+      strlcpy(cfg, "input_device_p",     sizeof(cfg));
+      strlcat(cfg, formatted_number,     sizeof(cfg));
       config_set_int(conf, cfg, settings->uints.input_device[i]);
-      snprintf(cfg, sizeof(cfg), "input_player%u_joypad_index", i + 1);
+      strlcpy(cfg, "input_player",       sizeof(cfg));
+      strlcat(cfg, formatted_number,     sizeof(cfg));
+      strlcat(cfg, "_joypad_index",      sizeof(cfg));
       config_set_int(conf, cfg, settings->uints.input_joypad_index[i]);
-      snprintf(cfg, sizeof(cfg), "input_player%u_analog_dpad_mode", i + 1);
+      strlcpy(cfg, "input_player",       sizeof(cfg));
+      strlcat(cfg, formatted_number,     sizeof(cfg));
+      strlcat(cfg, "_analog_dpad_mode",  sizeof(cfg));
       config_set_int(conf, cfg, settings->uints.input_analog_dpad_mode[i]);
-      snprintf(cfg, sizeof(cfg), "input_player%u_mouse_index", i + 1);
+      strlcpy(cfg, "input_player",       sizeof(cfg));
+      strlcat(cfg, formatted_number,     sizeof(cfg));
+      strlcat(cfg, "_mouse_index",       sizeof(cfg));
       config_set_int(conf, cfg, settings->uints.input_mouse_index[i]);
    }
 
@@ -4724,16 +4742,16 @@ bool config_save_file(const char *path)
    }
 
 #ifdef HAVE_NETWORKGAMEPAD
-   for (i = 0; i < MAX_USERS; i++)
    {
       char tmp[64];
-
-      tmp[0] = '\0';
-
-      snprintf(tmp, sizeof(tmp), "network_remote_enable_user_p%u", i + 1);
-      config_set_string(conf, tmp,
-            settings->bools.network_remote_enable_user[i]
-            ? "true" : "false");
+      size_t _len = strlcpy(tmp, "network_remote_enable_user_p", sizeof(tmp));
+      for (i = 0; i < MAX_USERS; i++)
+      {
+         snprintf(tmp + _len, sizeof(tmp) - _len, "%u", i + 1);
+         config_set_string(conf, tmp,
+               settings->bools.network_remote_enable_user[i]
+               ? "true" : "false");
+      }
    }
 #endif
 
@@ -4964,19 +4982,25 @@ bool config_save_overrides(enum override_type type, void *data)
       for (i = 0; i < MAX_USERS; i++)
       {
          char cfg[64];
+         char formatted_number[4];
+         cfg[0] = formatted_number[0] = '\0';
 
-         cfg[0] = '\0';
+         snprintf(formatted_number, sizeof(formatted_number), "%u", i + 1);
+
          if (settings->uints.input_device[i]
                != overrides->uints.input_device[i])
          {
-            snprintf(cfg, sizeof(cfg), "input_device_p%u", i + 1);
+            strlcpy(cfg, "input_device_p", sizeof(cfg));
+            strlcat(cfg, formatted_number, sizeof(cfg));
             config_set_int(conf, cfg, overrides->uints.input_device[i]);
          }
 
          if (settings->uints.input_joypad_index[i]
                != overrides->uints.input_joypad_index[i])
          {
-            snprintf(cfg, sizeof(cfg), "input_player%u_joypad_index", i + 1);
+            strlcpy(cfg, "input_player",   sizeof(cfg));
+            strlcat(cfg, formatted_number, sizeof(cfg));
+            strlcpy(cfg, "_joypad_index",  sizeof(cfg));
             config_set_int(conf, cfg, overrides->uints.input_joypad_index[i]);
          }
       }
@@ -5117,13 +5141,11 @@ bool input_remapping_load_file(void *data, const char *path)
       size_t _len;
       char prefix[16];
       char s1[32], s2[32], s3[32];
-
-      prefix[0]  = '\0';
-      s1[0]      = '\0';
-      s2[0]      = '\0';
-      s3[0]      = '\0';
-
-      snprintf(prefix, sizeof(prefix), "input_player%u", i + 1);
+      char formatted_number[4];
+      formatted_number[0] = '\0';
+      snprintf(formatted_number, sizeof(formatted_number), "%u", i + 1);
+      strlcpy(prefix, "input_player",   sizeof(prefix));
+      strlcat(prefix, formatted_number, sizeof(prefix));
       _len       = strlcpy(s1, prefix, sizeof(s1));
       s1[_len  ] = '_';
       s1[_len+1] = 'b';
@@ -5204,13 +5226,16 @@ bool input_remapping_load_file(void *data, const char *path)
          }
       }
 
-      snprintf(s1, sizeof(s1), "input_player%u_analog_dpad_mode", i + 1);
+      strlcpy(s1, prefix,                     sizeof(s1));
+      strlcat(s1, "_analog_dpad_mode",        sizeof(s1));
       CONFIG_GET_INT_BASE(conf, settings, uints.input_analog_dpad_mode[i], s1);
 
-      snprintf(s1, sizeof(s1), "input_libretro_device_p%u", i + 1);
+      strlcpy(s1, "input_libretro_device_p",  sizeof(s1));
+      strlcat(s1, formatted_number,           sizeof(s1));
       CONFIG_GET_INT_BASE(conf, settings, uints.input_libretro_device[i], s1);
 
-      snprintf(s1, sizeof(s1), "input_remap_port_p%u", i + 1);
+      strlcpy(s1, "input_remap_port_p",       sizeof(s1));
+      strlcat(s1, formatted_number,           sizeof(s1));
       CONFIG_GET_INT_BASE(conf, settings, uints.input_remap_ports[i], s1);
    }
 
@@ -5267,15 +5292,13 @@ bool input_remapping_save_file(const char *path)
    {
       size_t _len;
       bool skip_port = true;
+      char formatted_number[4];
       char prefix[16];
       char s1[32];
       char s2[32];
       char s3[32];
 
-      prefix[0] = '\0';
-      s1[0]     = '\0';
-      s2[0]     = '\0';
-      s3[0]     = '\0';
+      formatted_number[0] = '\0';
 
       /* We must include all mapped ports + all those
        * with an index less than max_users */
@@ -5298,7 +5321,9 @@ bool input_remapping_save_file(const char *path)
       if (skip_port)
          continue;
 
-      snprintf(prefix, sizeof(prefix), "input_player%u", i + 1);
+      snprintf(formatted_number, sizeof(formatted_number), "%u", i + 1);
+      strlcpy(prefix, "input_player",   sizeof(prefix));
+      strlcat(prefix, formatted_number, sizeof(prefix));
       _len       = strlcpy(s1, prefix, sizeof(s1));
       s1[_len  ] = '_';
       s1[_len+1] = 'b';
@@ -5384,13 +5409,16 @@ bool input_remapping_save_file(const char *path)
                   settings->uints.input_keymapper_ids[i][j]);
       }
 
-      snprintf(s1, sizeof(s1), "input_libretro_device_p%u", i + 1);
+      strlcpy(s1, "input_libretro_device_p", sizeof(s1));
+      strlcat(s1, formatted_number,          sizeof(s1));
       config_set_int(conf, s1, input_config_get_device(i));
 
-      snprintf(s1, sizeof(s1), "input_player%u_analog_dpad_mode", i + 1);
+      strlcpy(s1, prefix,                    sizeof(s1));
+      strlcat(s1, "_analog_dpad_mode",       sizeof(s1));
       config_set_int(conf, s1, settings->uints.input_analog_dpad_mode[i]);
 
-      snprintf(s1, sizeof(s1), "input_remap_port_p%u", i + 1);
+      strlcpy(s1, "input_remap_port_p",      sizeof(s1));
+      strlcat(s1, formatted_number,          sizeof(s1));
       config_set_int(conf, s1, settings->uints.input_remap_ports[i]);
    }
 

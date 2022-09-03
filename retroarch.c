@@ -55,7 +55,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
-#include <errno.h>
 #include <math.h>
 #include <locale.h>
 
@@ -308,7 +307,7 @@ struct rarch_state
    char path_content[PATH_MAX_LENGTH];
    char path_libretro[PATH_MAX_LENGTH];
    char path_config_file[PATH_MAX_LENGTH];
-   char path_config_append_file[256];
+   char path_config_append_file[PATH_MAX_LENGTH];
    char path_core_options_file[PATH_MAX_LENGTH];
    char dir_system[PATH_MAX_LENGTH];
    char dir_savefile[PATH_MAX_LENGTH];
@@ -1694,14 +1693,15 @@ bool command_event(enum event_command cmd, void *data)
 
             if (video_driver_get_video_output_size(&width, &height, desc, sizeof(desc)))
             {
-               char msg[128] = {0};
+               char msg[128];
 
                video_driver_set_video_mode(width, height, true);
 
                if (width == 0 || height == 0)
-                  snprintf(msg, sizeof(msg), msg_hash_to_str(MSG_SCREEN_RESOLUTION_DEFAULT));
+                  strlcpy(msg, msg_hash_to_str(MSG_SCREEN_RESOLUTION_DEFAULT), sizeof(msg));
                else
                {
+                  msg[0] = '\0';
                   if (!string_is_empty(desc))
                      snprintf(msg, sizeof(msg),
                         msg_hash_to_str(MSG_SCREEN_RESOLUTION_DESC),
@@ -2225,6 +2225,7 @@ bool command_event(enum event_command cmd, void *data)
       case CMD_EVENT_HISTORY_INIT:
          {
             playlist_config_t playlist_config;
+            const char *_msg                       = NULL;
             bool history_list_enable               = settings->bools.history_list_enable;
             const char *path_content_history       = settings->paths.path_content_history;
             const char *path_content_music_history = settings->paths.path_content_music_history;
@@ -2246,18 +2247,18 @@ bool command_event(enum event_command cmd, void *data)
             if (!history_list_enable)
                return false;
 
+            _msg = msg_hash_to_str(MSG_LOADING_HISTORY_FILE);
+
             /* Note: Sorting is disabled by default for
              * all content history playlists */
-            RARCH_LOG("[Playlist]: %s: \"%s\".\n",
-                  msg_hash_to_str(MSG_LOADING_HISTORY_FILE),
+            RARCH_LOG("[Playlist]: %s: \"%s\".\n", _msg,
                   path_content_history);
             playlist_config_set_path(&playlist_config, path_content_history);
             g_defaults.content_history = playlist_init(&playlist_config);
             playlist_set_sort_mode(
                   g_defaults.content_history, PLAYLIST_SORT_MODE_OFF);
 
-            RARCH_LOG("[Playlist]: %s: \"%s\".\n",
-                  msg_hash_to_str(MSG_LOADING_HISTORY_FILE),
+            RARCH_LOG("[Playlist]: %s: \"%s\".\n", _msg,
                   path_content_music_history);
             playlist_config_set_path(&playlist_config, path_content_music_history);
             g_defaults.music_history = playlist_init(&playlist_config);
@@ -2265,8 +2266,7 @@ bool command_event(enum event_command cmd, void *data)
                   g_defaults.music_history, PLAYLIST_SORT_MODE_OFF);
 
 #if defined(HAVE_FFMPEG) || defined(HAVE_MPV)
-            RARCH_LOG("[Playlist]: %s: \"%s\".\n",
-                  msg_hash_to_str(MSG_LOADING_HISTORY_FILE),
+            RARCH_LOG("[Playlist]: %s: \"%s\".\n", _msg,
                   path_content_video_history);
             playlist_config_set_path(&playlist_config, path_content_video_history);
             g_defaults.video_history = playlist_init(&playlist_config);
@@ -2275,8 +2275,7 @@ bool command_event(enum event_command cmd, void *data)
 #endif
 
 #ifdef HAVE_IMAGEVIEWER
-            RARCH_LOG("[Playlist]: %s: \"%s\".\n",
-                  msg_hash_to_str(MSG_LOADING_HISTORY_FILE),
+            RARCH_LOG("[Playlist]: %s: \"%s\".\n", _msg,
                   path_content_image_history);
             playlist_config_set_path(&playlist_config, path_content_image_history);
             g_defaults.image_history = playlist_init(&playlist_config);
@@ -2571,6 +2570,7 @@ bool command_event(enum event_command cmd, void *data)
             const char *core_path          = "DETECT";
             size_t *playlist_index         = (size_t*)data;
             struct playlist_entry entry    = {0};
+            unsigned i                     = 0;
 
             /* the update function reads our entry as const,
              * so these casts are safe */
@@ -2580,9 +2580,11 @@ bool command_event(enum event_command cmd, void *data)
             command_playlist_update_write(
                   NULL, *playlist_index, &entry);
 
+            /* Update playlist metadata */
+            menu_driver_ctl(RARCH_MENU_CTL_REFRESH_THUMBNAIL_IMAGE, &i);
+
             runloop_msg_queue_push(msg_hash_to_str(MSG_RESET_CORE_ASSOCIATION), 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
             break;
-
          }
       case CMD_EVENT_RESTART_RETROARCH:
          if (!frontend_driver_set_fork(FRONTEND_FORK_RESTART))
@@ -5280,7 +5282,9 @@ bool retroarch_main_init(int argc, char *argv[])
 
          if (!string_is_empty(cpu_model))
          {
-            size_t _len        = strlcat(str_output, FILE_PATH_LOG_INFO " CPU Model Name: ", sizeof(str_output));
+            size_t _len;
+            strlcat(str_output, FILE_PATH_LOG_INFO " CPU Model Name: ",
+                  sizeof(str_output));
             _len               = strlcat(str_output, cpu_model, sizeof(str_output));
             str_output[_len  ] = '\n';
             str_output[_len+1] = '\0';
