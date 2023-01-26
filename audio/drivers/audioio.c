@@ -214,5 +214,4 @@ audio_driver_t audio_audioio = {
    audioio_write_avail,
    audioio_buffer_size,
 };
-
 #endif

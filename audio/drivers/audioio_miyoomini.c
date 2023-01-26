@@ -99,8 +99,8 @@ static void *miao_init(const char *device,
    if (MI_AO_SetPubAttr(0,&attr)) goto error;
    if (MI_AO_Enable(0)) goto error;
    if (MI_AO_EnableChn(0,0)) goto error;
-   if (MI_AO_SetVolume(0,0)) goto error;
-   if (MI_AO_SetMute(0, FALSE)) goto error;
+   if (MI_AO_SetMute(0,FALSE)) goto error;
+/* if (MI_AO_SetVolume(0,0)) goto error; */
 
    /* Send pre-fill null data */
    miaoaudio->nullbuf = calloc(1, miaoaudio->bufsize);
@@ -167,7 +167,6 @@ static bool miao_stop(void *data)
 {
    miao_audio_t *miaoaudio = (miao_audio_t*)data;
    if (!miaoaudio->is_paused) {
-      MI_AO_SetMute(0, TRUE);
       miaoaudio->is_paused = true;
    }
    return true;
@@ -182,7 +181,6 @@ static bool miao_start(void *data, bool is_shutdown)
       miaoaudio->AoSendFrame.u32Len = miaoaudio->bufsize;
       MI_AO_ClearChnBuf(0,0);
       MI_AO_SendFrame(0, 0, &miaoaudio->AoSendFrame, 0);
-      MI_AO_SetMute(0, FALSE);
       miaoaudio->is_paused = false;
    }
    return true;
@@ -203,7 +201,6 @@ static void miao_set_nonblock_state(void *data, bool state)
 static void miao_free(void *data)
 {
    miao_audio_t *miaoaudio = (miao_audio_t*)data;
-   MI_AO_SetMute(0, FALSE);
    MI_AO_ClearChnBuf(0,0);
    MI_AO_DisableChn(0,0);
    MI_AO_Disable(0);

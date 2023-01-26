@@ -75,10 +75,17 @@ static void *oss_init(const char *device,
          return NULL;
       }
       ossaudio->audioserver = true;
+      new_rate = rate;
       RARCH_LOG("[OSS]: Using audioserver.\n");
-  }
+   } else {
+      /* stock oss supports 48k, 32k, 16k, 8k only */
+      if ( rate > 32000 ) new_rate = 48000;
+      else if ( rate > 16000 ) new_rate = 32000;
+      else if ( rate > 8000 ) new_rate = 16000;
+      else new_rate = 8000;
+   }
 
-   frags = (latency * rate * 4) / (1000 * (1 << 10));
+   frags = (latency * new_rate * 4) / (1000 * (1 << 10));
    frag  = (frags << 16) | 10;
 
    if (ioctl(ossaudio->fd, SNDCTL_DSP_SETFRAGMENT, &frag) < 0)
@@ -92,15 +99,6 @@ static void *oss_init(const char *device,
 
    if (ioctl(ossaudio->fd, SNDCTL_DSP_SETFMT, &format) < 0)
       goto error;
-
-   new_rate = rate;
-   if (!ossaudio->audioserver) {
-      /* stock oss supports 48k, 32k, 16k, 8k only */
-      if ( new_rate > 32000 ) new_rate = 48000;
-      else if ( new_rate > 16000 ) new_rate = 32000;
-      else if ( new_rate > 8000 ) new_rate = 16000;
-      else new_rate = 8000;
-   }
 
    if (ioctl(ossaudio->fd, SNDCTL_DSP_SPEED, &new_rate) < 0)
       goto error;

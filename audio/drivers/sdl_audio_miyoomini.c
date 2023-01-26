@@ -36,7 +36,7 @@
 #include "../audio_driver.h"
 #include "../../verbosity.h"
 
-#define SDL_AUDIO_SAMPLES 512
+#define SDL_AUDIO_SAMPLES 256
 
 typedef struct sdl_audio
 {
@@ -96,9 +96,6 @@ static void *sdl_audio_init(const char *device,
    if (!sdl)
       return NULL;
 
-   frames        = (latency * (rate - 1)) / (1000 * SDL_AUDIO_SAMPLES) + 1;
-   if (frames < 2) frames = 2; /* at least 2 frames */
-
    spec.freq     = rate;
    spec.format   = AUDIO_S16SYS;
    spec.channels = 2;
@@ -112,12 +109,14 @@ static void *sdl_audio_init(const char *device,
       goto error;
    }
 
-   *new_rate                = out.freq;
-
 #ifdef HAVE_THREADS
-   sdl->lock                = slock_new();
-   sdl->cond                = scond_new();
+   sdl->lock = slock_new();
+   sdl->cond = scond_new();
 #endif
+
+   *new_rate = out.freq;
+   frames    = (latency * (out.freq - 1)) / (1000 * out.samples) + 1;
+   if (frames < 2) frames = 2; /* at least 2 frames */
 
    RARCH_LOG("[SDL audio]: Requested %u ms latency, got %d ms\n",
          latency, (int)(out.samples * frames * 1000 / (*new_rate)));

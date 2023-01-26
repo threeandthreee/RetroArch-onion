@@ -92,6 +92,9 @@ struct sdl_miyoomini_video
    uint32_t font_colour32;
    SDL_Surface *menuscreen;
    SDL_Surface *menuscreen_rgui;
+#ifdef HAVE_OVERLAY
+   SDL_Surface *overlay_surface;
+#endif
    unsigned msg_count;
    char msg_tmp[OSD_TEXT_LEN_MAX];
 };
@@ -457,10 +460,30 @@ static void sdl_miyoomini_clear_border(void* buf, unsigned x, unsigned y, unsign
 enum cpugov { PERFORMANCE = 0, POWERSAVE = 1, ONDEMAND = 2 };
 static void sdl_miyoomini_set_cpugovernor(enum cpugov gov) {
    const char govstr[3][12] = { "performance", "powersave", "ondemand" };
-   int fd = open("/sys/devices/system/cpu/cpufreq/policy0/scaling_governor", O_WRONLY);
-   if (fd > 0) {
-      write(fd, govstr[gov], strlen(govstr[gov])); close(fd);
+   const char fn_min_freq[] = "/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq";
+   const char fn_governor[] = "/sys/devices/system/cpu/cpufreq/policy0/scaling_governor";
+   static uint32_t minfreq = 0;
+   FILE* fp;
+
+   if (!minfreq) {
+      /* save min_freq */
+      fp = fopen(fn_min_freq, "r");
+      if (fp) { fscanf(fp, "%d", &minfreq); fclose(fp); }
+      /* set min_freq to lowest */
+      fp = fopen(fn_min_freq, "w");
+      if (fp) { fprintf(fp, "%d", 0); fclose(fp); }
    }
+
+   if (gov == ONDEMAND) {
+      /* revert min_freq */
+      fp = fopen(fn_min_freq, "w");
+      if (fp) { fprintf(fp, "%d", minfreq); fclose(fp); }
+      minfreq = 0;
+   }
+
+   /* set governor */
+   fp = fopen(fn_governor, "w");
+   if (fp) { fwrite(govstr[gov], 1, strlen(govstr[gov]), fp); fclose(fp); }
 }
 
 static void sdl_miyoomini_init_font_color(sdl_miyoomini_video_t *vid) {
@@ -490,6 +513,9 @@ static void sdl_miyoomini_gfx_free(void *data) {
    if (vid->screen) GFX_FreeSurface(vid->screen);
    if (vid->menuscreen) GFX_FreeSurface(vid->menuscreen);
    if (vid->menuscreen_rgui) GFX_FreeSurface(vid->menuscreen_rgui);
+#ifdef HAVE_OVERLAY
+   if (vid->overlay_surface) { GFX_SetupOverlaySurface(NULL); GFX_FreeSurface(vid->overlay_surface); }
+#endif
    GFX_Quit();
 
    if (vid->osd_font) bitmapfont_free_lut(vid->osd_font);
@@ -500,7 +526,7 @@ static void sdl_miyoomini_gfx_free(void *data) {
 }
 
 static void sdl_miyoomini_input_driver_init(
-      const char *input_driver_name, const char *joypad_driver_name,
+      const char *input_drv_name, const char *joypad_drv_name,
       input_driver_t **input, void **input_data) {
    /* Sanity check */
    if (!input || !input_data) return;
@@ -510,37 +536,37 @@ static void sdl_miyoomini_input_driver_init(
 
    /* If input driver name is empty, cannot
     * initialise anything... */
-   if (string_is_empty(input_driver_name)) return;
+   if (string_is_empty(input_drv_name)) return;
 
-   if (string_is_equal(input_driver_name, "sdl_dingux")) {
+   if (string_is_equal(input_drv_name, "sdl_dingux")) {
       *input_data = input_driver_init_wrap(&input_sdl_dingux,
-            joypad_driver_name);
+            joypad_drv_name);
       if (*input_data) *input = &input_sdl_dingux;
       return;
    }
 
 #if defined(HAVE_SDL) || defined(HAVE_SDL2)
-   if (string_is_equal(input_driver_name, "sdl")) {
+   if (string_is_equal(input_drv_name, "sdl")) {
       *input_data = input_driver_init_wrap(&input_sdl,
-            joypad_driver_name);
+            joypad_drv_name);
       if (*input_data) *input = &input_sdl;
       return;
    }
 #endif
 
 #if defined(HAVE_UDEV)
-   if (string_is_equal(input_driver_name, "udev")) {
+   if (string_is_equal(input_drv_name, "udev")) {
       *input_data = input_driver_init_wrap(&input_udev,
-            joypad_driver_name);
+            joypad_drv_name);
       if (*input_data) *input = &input_udev;
       return;
    }
 #endif
 
 #if defined(__linux__)
-   if (string_is_equal(input_driver_name, "linuxraw")) {
+   if (string_is_equal(input_drv_name, "linuxraw")) {
       *input_data = input_driver_init_wrap(&input_linuxraw,
-            joypad_driver_name);
+            joypad_drv_name);
       if (*input_data) *input = &input_linuxraw;
       return;
    }
@@ -648,8 +674,8 @@ static void *sdl_miyoomini_gfx_init(const video_info_t *video,
    sdl_miyoomini_video_t *vid                    = NULL;
    uint32_t sdl_subsystem_flags                  = SDL_WasInit(0);
    settings_t *settings                          = config_get_ptr();
-   const char *input_driver_name                 = settings->arrays.input_driver;
-   const char *joypad_driver_name                = settings->arrays.input_joypad_driver;
+   const char *input_drv_name                 = settings->arrays.input_driver;
+   const char *joypad_drv_name                = settings->arrays.input_joypad_driver;
 
    sdl_miyoomini_set_cpugovernor(PERFORMANCE);
 
@@ -691,8 +717,8 @@ static void *sdl_miyoomini_gfx_init(const video_info_t *video,
 
    GFX_SetFlipFlags(vid->vsync ? GFX_BLOCKING|GFX_FLIPWAIT : 0);
 
-   sdl_miyoomini_input_driver_init(input_driver_name,
-         joypad_driver_name, input, input_data);
+   sdl_miyoomini_input_driver_init(input_drv_name,
+         joypad_drv_name, input, input_data);
 
    /* Initialise OSD font */
    sdl_miyoomini_init_font_color(vid);
@@ -836,6 +862,7 @@ static void sdl_miyoomini_gfx_check_window(sdl_miyoomini_video_t *vid) {
          continue;
 
       vid->quitting = true;
+      sdl_miyoomini_set_cpugovernor(ONDEMAND);
       break;
    }
 }
@@ -875,12 +902,9 @@ static void sdl_miyoomini_gfx_viewport_info(void *data, struct video_viewport *v
    sdl_miyoomini_video_t *vid = (sdl_miyoomini_video_t*)data;
    if (unlikely(!vid)) return;
 
-   vp->x           = vid->video_x;
-   vp->y           = vid->video_y;
-   vp->width       = vid->video_w;
-   vp->height      = vid->video_h;
-   vp->full_width  = SDL_MIYOOMINI_WIDTH;
-   vp->full_height = SDL_MIYOOMINI_HEIGHT;
+   vp->x = vp->y = 0;
+   vp->width  = vp->full_width  = vid->content_width;
+   vp->height = vp->full_height = vid->content_height;
 }
 
 static float sdl_miyoomini_get_refresh_rate(void *data) { return 60.0f; }
@@ -959,6 +983,74 @@ static void sdl_miyoomini_get_poke_interface(void *data, const video_poke_interf
 static bool sdl_miyoomini_gfx_set_shader(void *data,
       enum rarch_shader_type type, const char *path) { return false; }
 
+#ifdef HAVE_OVERLAY
+
+static void sdl_miyoomini_overlay_enable(void *data, bool state) {
+	sdl_miyoomini_video_t *vid = (sdl_miyoomini_video_t *)data;
+	if (!vid) return;
+
+	if ((state)&&(vid->overlay_surface)) GFX_SetupOverlaySurface(vid->overlay_surface);
+	else GFX_SetupOverlaySurface(NULL);
+}
+
+static bool sdl_miyoomini_overlay_load(void *data, const void *image_data, unsigned num_images) {
+	sdl_miyoomini_video_t *vid = (sdl_miyoomini_video_t *)data;
+	if (!vid) return false;
+
+	struct texture_image *images = (struct texture_image *)image_data;
+	void* pixels = images[0].pixels;
+	uint32_t width = images[0].width;
+	uint32_t height = images[0].height;
+
+	if (vid->overlay_surface) GFX_FreeSurface(vid->overlay_surface);
+	SDL_Surface *ostmp = SDL_CreateRGBSurfaceFrom(pixels, width, height, 32, width*4,
+				0x00FF0000, 0x0000FF00, 0x0000FF00, 0xFF000000);
+	SDL_Surface *ostmp2 = GFX_DuplicateSurface(ostmp);
+	SDL_FreeSurface(ostmp);
+	vid->overlay_surface = GFX_CreateRGBSurface(0, 640, 480, 32,
+				0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+	GFX_BlitSurfaceRotate(ostmp2, NULL, vid->overlay_surface, NULL, 2);
+	GFX_FreeSurface(ostmp2);
+
+	GFX_SetupOverlaySurface(vid->overlay_surface);
+
+	return true;
+}
+
+static void sdl_miyoomini_overlay_tex_geom(void *data, unsigned idx, float x, float y, float w, float h) { }
+static void sdl_miyoomini_overlay_vertex_geom(void *data, unsigned idx, float x, float y, float w, float h) { }
+static void sdl_miyoomini_overlay_full_screen(void *data, bool enable) { }
+
+static void sdl_miyoomini_overlay_set_alpha(void *data, unsigned idx, float mod) {
+	sdl_miyoomini_video_t *vid = (sdl_miyoomini_video_t *)data;
+	if ((!idx)&&(vid)&&(vid->overlay_surface)) {
+		uint8_t value = mod * 0xFF;
+		if (!(vid->overlay_surface->flags & SDL_SRCALPHA)||(vid->overlay_surface->format->alpha != value)) {
+			SDL_SetAlpha(vid->overlay_surface, SDL_SRCALPHA, value);
+			GFX_SetupOverlaySurface(vid->overlay_surface);
+		}
+	}
+	return;
+}
+
+static const video_overlay_interface_t sdl_miyoomini_overlay = {
+	sdl_miyoomini_overlay_enable,
+	sdl_miyoomini_overlay_load,
+	sdl_miyoomini_overlay_tex_geom,
+	sdl_miyoomini_overlay_vertex_geom,
+	sdl_miyoomini_overlay_full_screen,
+	sdl_miyoomini_overlay_set_alpha,
+};
+
+void sdl_miyoomini_gfx_get_overlay_interface(void *data, const video_overlay_interface_t **iface)
+{
+    sdl_miyoomini_video_t *vid = (sdl_miyoomini_video_t *)data;
+    if (!vid) return;
+    *iface = &sdl_miyoomini_overlay;
+}
+
+#endif
+
 video_driver_t video_sdl_dingux = {
    sdl_miyoomini_gfx_init,
    sdl_miyoomini_gfx_frame,
@@ -976,7 +1068,7 @@ video_driver_t video_sdl_dingux = {
    NULL, /* read_viewport  */
    NULL, /* read_frame_raw */
 #ifdef HAVE_OVERLAY
-   NULL, /* get_overlay_interface */
+   sdl_miyoomini_gfx_get_overlay_interface,
 #endif
 #ifdef HAVE_VIDEO_LAYOUT
    NULL, /* get_video_layout_render_interface */

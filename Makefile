@@ -73,7 +73,7 @@ HAVE_OPENGLES = 0
 HAVE_OPENGLES3 = 0
 HAVE_OPENGL_CORE = 0
 HAVE_OPENSSL = 0
-HAVE_OVERLAY = 0
+HAVE_OVERLAY = 1
 HAVE_RBMP = 1
 HAVE_RJPEG = 1
 HAVE_RPILED = 0
@@ -113,9 +113,9 @@ LINK := $(CXX)
 DEF_FLAGS := -marm -mtune=cortex-a7 -march=armv7ve+simd -mfpu=neon-vfpv4 -mfloat-abi=hard -ffast-math -fomit-frame-pointer
 DEF_FLAGS += -ffunction-sections -fdata-sections
 DEF_FLAGS += -I. -Ideps -Ideps/stb -DMIYOOMINI -DDINGUX -MMD
-DEF_FLAGS += -Wall -Wno-unused-variable $(LTO)
+DEF_FLAGS += -Wall -Wno-unused-function -Wno-unused-variable $(LTO)
 DEF_FLAGS += -std=gnu99 -D_GNU_SOURCE
-LIBS := -ldl -lz -lrt -pthread -lmi_sys -lmi_gfx -lmi_ao -lmi_common
+LIBS := -ldl -lz -lrt -pthread -lmi_sys -lmi_gfx -lmi_ao
 CFLAGS := 
 CXXFLAGS := -fno-exceptions -fno-rtti -std=c++11 -D__STDC_CONSTANT_MACROS
 ASFLAGS :=

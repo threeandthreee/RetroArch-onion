@@ -56,6 +56,9 @@
 /* Miyoo defines */
 #define MIYOO_BATTERY_VOLTAGE_NOW_FILE    "/sys/class/power_supply/miyoo-battery/voltage_now"
 
+/* RetroFW */
+#define RETROFW_BATTERY_VOLTAGE_NOW_FILE "/proc/jz/battery"
+
 /* Enables/disables downscaling when using
  * the IPU hardware scaler */
 bool dingux_ipu_set_downscaling_enable(bool enable)
@@ -438,6 +441,7 @@ int dingux_get_battery_level(void)
    return dingux_read_battery_sys_file(DINGUX_BATTERY_CAPACITY_FILE);
 #endif
 }
+#endif
 
 /* Fetches the path of the base 'retroarch'
  * directory */
