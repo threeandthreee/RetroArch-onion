@@ -1434,8 +1434,13 @@ void command_event_set_savestate_garbage_collect(
     * > Conservative behaviour, designed to minimise
     *   the risk of deleting multiple incorrect files
     *   in case of accident */
-   if (!string_is_empty(oldest_save) && (cnt > max_to_keep))
+   if (!string_is_empty(oldest_save) && (cnt > max_to_keep)) {
+      char oldest_save_thumbnail[PATH_MAX_LENGTH];
+      strncpy(oldest_save_thumbnail, oldest_save, PATH_MAX_LENGTH - 5);
+      strcat(oldest_save_thumbnail, ".png");
       filestream_delete(oldest_save);
+      filestream_delete(oldest_save_thumbnail);
+   }
 
    dir_list_free(dir_list);
 }
