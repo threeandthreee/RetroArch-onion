@@ -193,6 +193,8 @@ typedef struct
    /* Screensaver colors */
    uint16_t ss_bg_color;
    uint16_t ss_particle_color;
+   /* Null color */
+   uint16_t disabled_color;
 } rgui_colors_t;
 
 typedef struct
@@ -244,6 +246,34 @@ typedef struct
    unsigned width;
    unsigned height;
 } frame_buf_t;
+
+enum rgui_flags
+{
+   RGUI_FLAG_BG_MODIFIED               = (1 << 0),
+   RGUI_FLAG_FORCE_REDRAW              = (1 << 1),
+   RGUI_FLAG_FORCE_MENU_REFRESH        = (1 << 2),
+   RGUI_FLAG_RESTORE_ASPECT_LOCK       = (1 << 3),
+   RGUI_FLAG_SHOW_MOUSE                = (1 << 4),
+   RGUI_FLAG_SHOW_SCREENSAVER          = (1 << 5),
+   RGUI_FLAG_SHOW_WALLPAPER            = (1 << 6),
+   RGUI_FLAG_IGNORE_RESIZE_EVENTS      = (1 << 7),
+   RGUI_FLAG_BG_THICKNESS              = (1 << 8),
+   RGUI_FLAG_BORDER_THICKNESS          = (1 << 9),
+   RGUI_FLAG_BORDER_ENABLE             = (1 << 10),
+   RGUI_FLAG_TRANSPARENCY_SUPPORTED    = (1 << 11),
+   RGUI_FLAG_TRANSPARENCY_ENABLE       = (1 << 12),
+   RGUI_FLAG_SHADOW_ENABLE             = (1 << 13),
+   RGUI_FLAG_EXTENDED_ASCII_ENABLE     = (1 << 14),
+   RGUI_FLAG_IS_PLAYLIST               = (1 << 15),
+   RGUI_FLAG_IS_EXPLORE_LIST           = (1 << 16),
+   RGUI_FLAG_IS_STATE_SLOT             = (1 << 17),
+   RGUI_FLAG_WIDGETS_SUPPORTED         = (1 << 18),
+   RGUI_FLAG_THUMBNAIL_LOAD_PENDING    = (1 << 19),
+   RGUI_FLAG_ASPECT_UPDATE_PENDING     = (1 << 20),
+   RGUI_FLAG_ENTRY_HAS_THUMBNAIL       = (1 << 21),
+   RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL  = (1 << 22),
+   RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL = (1 << 23)
+};
 
 typedef struct
 {
@@ -299,11 +329,12 @@ typedef struct
 
    uint32_t thumbnail_queue_size;
    uint32_t left_thumbnail_queue_size;
+   uint32_t flags;
    int8_t gfx_thumbnails_prev;
 
    rgui_particle_t particles[RGUI_NUM_PARTICLES]; /* float alignment */
 
-   size_t playlist_index;
+   ssize_t playlist_index;
    int16_t scroll_y;
    rgui_colors_t colors;   /* int16_t alignment */
 
@@ -324,33 +355,7 @@ typedef struct
    char menu_title[255];                          /* Must be a fixed length array... */
    char menu_sublabel[MENU_SUBLABEL_MAX_LENGTH];  /* Must be a fixed length array... */
 
-   bool bg_modified;
-   bool force_redraw;
-   bool force_menu_refresh;
-   bool restore_aspect_lock;
-   bool show_mouse;
-   bool show_screensaver;
-   bool ignore_resize_events;
-   bool bg_thickness;
-   bool border_thickness;
-   bool border_enable;
-   bool transparency_supported;
-   bool transparency_enable;
-   bool shadow_enable;
-   bool extended_ascii_enable;
-   bool is_playlist;
-   bool is_explore_list;
    bool is_quick_menu;
-   bool is_state_slot;
-   bool entry_has_thumbnail;
-   bool entry_has_left_thumbnail;
-   bool show_fs_thumbnail;
-   bool thumbnail_load_pending;
-   bool show_wallpaper;
-   bool aspect_update_pending;
-#ifdef HAVE_GFX_WIDGETS
-   bool widgets_supported;
-#endif
 } rgui_t;
 
 static const rgui_theme_t rgui_theme_classic_red = {
@@ -1255,20 +1260,20 @@ static uint16_t argb32_to_rgb5a3(uint32_t col)
        * alpha and normal 4 bit alpha values... */
       unsigned a4    = a >> 4;
       float a_factor = 1.0f;
-      if (a3 > 0)
-      {
-         /* Avoid divide by zero errors... */
+      if (a3 > 0) /* Avoid divide by zero errors... */
          a_factor = ((float)a4 * (1.0f / 15.0f)) / ((float)a3 * (1.0f / 7.0f));
-      }
       r = (unsigned)(((float)r * a_factor) + 0.5f);
       g = (unsigned)(((float)g * a_factor) + 0.5f);
       b = (unsigned)(((float)b * a_factor) + 0.5f);
       /* a_factor can actually be greater than 1. This will never happen
        * with the current preset theme colour values, but users can set
        * any custom values they like, so we have to play it safe... */
-      r = (r <= 0xFF) ? r : 0xFF;
-      g = (g <= 0xFF) ? g : 0xFF;
-      b = (b <= 0xFF) ? b : 0xFF;
+      if (r >= 0xFF)
+         r = 0xFF;
+      if (g >= 0xFF)
+         g = 0xFF;
+      if (b >= 0xFF)
+         b = 0xFF;
    }
    /* Convert RGB from 8 bit to 4 bit */
    r = r >> 4;
@@ -1351,19 +1356,18 @@ static uint16_t (*argb32_to_pixel_platform_format)(uint32_t col) = argb32_to_rgb
 static bool rgui_set_pixel_format_function(void)
 {
    const char *driver_ident    = video_driver_get_ident();
-   bool transparency_supported = true;
    
    /* Default fallback... */
    if (string_is_empty(driver_ident))
    {
       argb32_to_pixel_platform_format = argb32_to_rgba4444;
-      return transparency_supported;
+      return true; /* Transparency supported */
    }
-   
-   if (     string_is_equal(driver_ident, "ps2"))             /* PS2 */
+
+   if (string_is_equal(driver_ident, "ps2"))                  /* PS2 */
    {
       argb32_to_pixel_platform_format = argb32_to_abgr1555;
-      transparency_supported          = false;
+      return false; /* Transparency not supported */
    }
    else if (string_is_equal(driver_ident, "gx"))              /* GEKKO */
       argb32_to_pixel_platform_format = argb32_to_rgb5a3;
@@ -1379,12 +1383,11 @@ static bool rgui_set_pixel_format_function(void)
             string_is_equal(driver_ident, "sdl_rs90"))
    {
       argb32_to_pixel_platform_format = argb32_to_rgb565;
-      transparency_supported          = false;
+      return false; /* Transparency not supported */
    }
    else
       argb32_to_pixel_platform_format = argb32_to_rgba4444;
-   
-   return transparency_supported;
+   return true; /* Transparency supported */
 }
 
 /* ==============================
@@ -1455,6 +1458,7 @@ static bool rgui_fonts_init(rgui_t *rgui)
    switch (language)
    {
       case RETRO_LANGUAGE_ENGLISH:
+      case RETRO_LANGUAGE_BRITISH_ENGLISH:
          goto english;
 
       case RETRO_LANGUAGE_FRENCH:
@@ -1478,7 +1482,7 @@ static bool rgui_fonts_init(rgui_t *rgui)
             settings_t *settings  = config_get_ptr();
             configuration_set_bool(settings,
                   settings->bools.menu_rgui_extended_ascii, true);
-            rgui->extended_ascii_enable = true;
+            rgui->flags                |= RGUI_FLAG_EXTENDED_ASCII_ENABLE;
             rgui->language              = language;
             goto english;
          }
@@ -1543,10 +1547,10 @@ static bool rgui_fonts_init(rgui_t *rgui)
       case RETRO_LANGUAGE_TURKISH:
       case RETRO_LANGUAGE_SLOVAK:
       case RETRO_LANGUAGE_CZECH:
+      case RETRO_LANGUAGE_HUNGARIAN:
       /* These languages are not yet implemented
       case RETRO_LANGUAGE_ROMANIAN:
       case RETRO_LANGUAGE_CROATIAN:
-      case RETRO_LANGUAGE_HUNGARIAN:
       case RETRO_LANGUAGE_SERBIAN:
       case RETRO_LANGUAGE_WELSH:
       */
@@ -1619,25 +1623,29 @@ english:
 
 static void rgui_fill_rect(
       uint16_t *data,
-      unsigned fb_width, unsigned fb_height,
-      unsigned x, unsigned y,
-      unsigned width, unsigned height,
-      uint16_t dark_color, uint16_t light_color,
+      unsigned fb_width,
+      unsigned fb_height,
+      unsigned x,
+      unsigned y,
+      unsigned width,
+      unsigned height,
+      uint16_t dark_color,
+      uint16_t light_color,
       bool thickness)
 {
    unsigned x_index, y_index;
    uint16_t scanline_even[RGUI_MAX_FB_WIDTH]; /* Initial values don't matter here */
    uint16_t scanline_odd[RGUI_MAX_FB_WIDTH];
-   unsigned x_start = x <= fb_width  ? x : fb_width;
-   unsigned y_start = y <= fb_height ? y : fb_height;
+   unsigned x_start = (x <= fb_width)  ? x : fb_width;
+   unsigned y_start = (y <= fb_height) ? y : fb_height;
    unsigned x_end_i = x + width;
    unsigned y_end_i = y + height;
    /* Note: unlike rgui_color_rect() and rgui_draw_particle(),
     * this function is frequently used to fill large areas.
     * We therefore gain significant performance benefits
     * from using memcpy() tricks... */
-   unsigned x_end  = x_end_i <= fb_width  ? x_end_i : fb_width;
-   unsigned y_end  = y_end_i <= fb_height ? y_end_i : fb_height;
+   unsigned x_end  = (x_end_i <= fb_width)  ? x_end_i : fb_width;
+   unsigned y_end  = (y_end_i <= fb_height) ? y_end_i : fb_height;
    size_t x_size   = (x_end - x_start) * sizeof(uint16_t);
 
    /* Sanity check */
@@ -1757,19 +1765,24 @@ static void rgui_fill_rect(
 
 static void rgui_color_rect(
       uint16_t *data,
-      unsigned fb_width, unsigned fb_height,
-      unsigned x, unsigned y,
-      unsigned width, unsigned height,
+      unsigned fb_width,
+      unsigned fb_height,
+      unsigned x,
+      unsigned y,
+      unsigned width,
+      unsigned height,
       uint16_t color)
 {
    unsigned x_index, y_index;
-   unsigned x_start = x <= fb_width  ? x : fb_width;
-   unsigned y_start = y <= fb_height ? y : fb_height;
+   unsigned x_start = (x <= fb_width)  ? x : fb_width;
+   unsigned y_start = (y <= fb_height) ? y : fb_height;
    unsigned x_end   = x + width;
    unsigned y_end   = y + height;
 
-   x_end            = x_end <= fb_width  ? x_end : fb_width;
-   y_end            = y_end <= fb_height ? y_end : fb_height;
+   if (x_end > fb_width)
+      x_end         = fb_width;
+   if (y_end > fb_height)
+      y_end         = fb_height;
 
    for (y_index = y_start; y_index < y_end; y_index++)
    {
@@ -1779,12 +1792,15 @@ static void rgui_color_rect(
    }
 }
 
-static void rgui_render_border(rgui_t *rgui, uint16_t *data,
-      unsigned fb_width, unsigned fb_height)
+static void rgui_render_border(
+      rgui_t *rgui,
+      uint16_t *data,
+      unsigned fb_width,
+      unsigned fb_height)
 {
    uint16_t dark_color   = rgui->colors.border_dark_color;
    uint16_t light_color  = rgui->colors.border_light_color;
-   bool thickness        = rgui->border_thickness;
+   bool thickness        = rgui->flags & RGUI_FLAG_BORDER_THICKNESS;
    
    /* Draw border */
    rgui_fill_rect(data, fb_width, fb_height,
@@ -1801,7 +1817,7 @@ static void rgui_render_border(rgui_t *rgui, uint16_t *data,
          dark_color, light_color, thickness);
    
    /* Draw drop shadow, if required */
-   if (rgui->shadow_enable)
+   if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
    {
       uint16_t shadow_color = rgui->colors.shadow_color;
       
@@ -1819,9 +1835,12 @@ static void rgui_render_border(rgui_t *rgui, uint16_t *data,
 /* Returns true if particle is on screen */
 static bool INLINE rgui_draw_particle(
       uint16_t *data,
-      unsigned fb_width, unsigned fb_height,
-      int x, int y,
-      unsigned width, unsigned height,
+      unsigned fb_width,
+      unsigned fb_height,
+      int x,
+      int y,
+      unsigned width,
+      unsigned height,
       uint16_t color)
 {
    unsigned x_index, y_index;
@@ -1836,13 +1855,17 @@ static bool INLINE rgui_draw_particle(
    int x_start   = (x_start_i <= (int)fb_width)  ? x_start_i : fb_width;
    int y_start   = (y_start_i <= (int)fb_height) ? y_start_i : fb_height;
    
-   x_end         = (x_end >  0)              ? x_end : 0;
-   x_end         = (x_end <= (int)fb_width)  ? x_end : fb_width;
+   if (x_end <= 0)
+      x_end      = 0;
+   else if (x_end > (int)fb_width)
+      x_end      = fb_width;
    
-   y_end         = (y_end >  0)              ? y_end : 0;
-   y_end         = (y_end <= (int)fb_height) ? y_end : fb_height;
+   if (y_end <= 0)
+      y_end      = 0;
+   else if (y_end > (int)fb_height)
+      y_end      = fb_height;
    
-   for (y_index = (unsigned)y_start; y_index < (unsigned)y_end; y_index++)
+   for (y_index  = (unsigned)y_start; y_index < (unsigned)y_end; y_index++)
    {
       uint16_t *data_ptr = data + (y_index * fb_width);
       for (x_index = (unsigned)x_start; x_index < (unsigned)x_end; x_index++)
@@ -1852,7 +1875,8 @@ static bool INLINE rgui_draw_particle(
    return (x_end > x_start) && (y_end > y_start);
 }
 
-static void rgui_init_particle_effect(rgui_t *rgui,
+static void rgui_init_particle_effect(
+      rgui_t *rgui,
       gfx_display_t *p_disp)
 {
    size_t i;
@@ -1888,8 +1912,8 @@ static void rgui_init_particle_effect(rgui_t *rgui,
                9, 9,
                10};
             unsigned num_drops = (unsigned)(0.85f * ((float)fb_width / (float)RGUI_MAX_FB_WIDTH) * (float)RGUI_NUM_PARTICLES);
-            
-            num_drops = num_drops < RGUI_NUM_PARTICLES ? num_drops : RGUI_NUM_PARTICLES;
+            if (num_drops >= RGUI_NUM_PARTICLES)
+               num_drops       = RGUI_NUM_PARTICLES;
             
             for (i = 0; i < num_drops; i++)
             {
@@ -1966,7 +1990,7 @@ static void rgui_render_particle_effect(
    float global_speed_factor        = 1.0f;
    
    /* Check whether screensaver is currently active */
-   if (rgui->show_screensaver)
+   if (rgui->flags & RGUI_FLAG_SHOW_SCREENSAVER)
    {
       /* Return early if screensaver animation is
        * disabled */
@@ -1984,8 +2008,7 @@ static void rgui_render_particle_effect(
 
    /* > Account for non-standard frame times
     *   (high/low refresh rates, or frame drops) */
-   global_speed_factor   *= p_anim->delta_time
-      / particle_effect_period;
+   global_speed_factor *= p_anim->delta_time / particle_effect_period;
    
    /* Note: It would be more elegant to have 'update' and 'draw'
     * as separate functions, since 'update' is the part that
@@ -2018,14 +2041,18 @@ static void rgui_render_particle_effect(
                rgui_particle_t *particle = &rgui->particles[i];
                
                /* Update particle 'speed' */
-               particle->c = particle->c + (float)(rand() % 16 - 9) * 0.01f;
-               particle->d = particle->d + (float)(rand() % 16 - 7) * 0.01f;
+               particle->c    = particle->c + (float)(rand() % 16 - 9) * 0.01f;
+               particle->d    = particle->d + (float)(rand() % 16 - 7) * 0.01f;
                
-               particle->c = (particle->c < -0.4f) ? -0.4f : particle->c;
-               particle->c = (particle->c >  0.1f) ?  0.1f : particle->c;
+               if (particle->c < -0.4f)
+                  particle->c = -0.4f;
+               else if (particle->c > 0.1f)
+                  particle->c = 0.1f;
                
-               particle->d = (particle->d < -0.1f) ? -0.1f : particle->d;
-               particle->d = (particle->d >  0.4f) ?  0.4f : particle->d;
+               if (particle->d < -0.1f)
+                  particle->d = -0.1f;
+               else if (particle->d >  0.4f)
+                  particle->d = 0.4f;
                
                /* Update particle location */
                particle->a = fmod(particle->a + (global_speed_factor * particle->c), fb_width);
@@ -2053,8 +2080,10 @@ static void rgui_render_particle_effect(
                /* Reset particle if it has fallen off screen */
                if (!on_screen)
                {
-                  particle->a = (particle->a < 0.0f) ? (particle->a + (float)fb_width)  : particle->a;
-                  particle->b = (particle->b < 0.0f) ? (particle->b + (float)fb_height) : particle->b;
+                  if (particle->a < 0.0f)
+                     particle->a = (particle->a + (float)fb_width);
+                  if (particle->b < 0.0f)
+                     particle->b = (particle->b + (float)fb_height);
                }
             }
          }
@@ -2071,24 +2100,26 @@ static void rgui_render_particle_effect(
                8, 8, 8,
                9, 9,
                10};
+            bool on_screen     = false;
             unsigned num_drops = (unsigned)(0.85f * ((float)fb_width / (float)RGUI_MAX_FB_WIDTH) * (float)RGUI_NUM_PARTICLES);
-            bool on_screen;
-            
-            num_drops = num_drops < RGUI_NUM_PARTICLES ? num_drops : RGUI_NUM_PARTICLES;
+            if (num_drops >= RGUI_NUM_PARTICLES)
+               num_drops       = RGUI_NUM_PARTICLES;
             
             for (i = 0; i < num_drops; i++)
             {
                rgui_particle_t *particle = &rgui->particles[i];
                
                /* Draw particle */
-               on_screen = rgui_draw_particle(frame_buf_data, fb_width, fb_height,
-                                 (int)particle->a, (int)particle->b,
-                                 2, (unsigned)particle->c, particle_color);
+               on_screen = rgui_draw_particle(
+                     frame_buf_data, fb_width, fb_height,
+                     (int)particle->a, (int)particle->b,
+                     2, (unsigned)particle->c, particle_color);
                
                /* Update y pos */
                particle->b += particle->d * global_speed_factor;
                
-               /* Reset particle if it has fallen off the bottom of the screen */
+               /* Reset particle if it has fallen off 
+                  the bottom of the screen */
                if (!on_screen)
                {
                   /* x pos */
@@ -2220,13 +2251,15 @@ static void rgui_render_particle_effect(
    /* If border is enabled, it must be drawn *above*
     * particle effect
     * (Wastes CPU cycles, but nothing we can do about it...) */
-   if (rgui->border_enable &&
-       !rgui->show_wallpaper &&
-       !rgui->show_screensaver)
+   if (       (rgui->flags & RGUI_FLAG_BORDER_ENABLE)
+         && (!(rgui->flags & RGUI_FLAG_SHOW_WALLPAPER))
+         && (!(rgui->flags & RGUI_FLAG_SHOW_SCREENSAVER)))
       rgui_render_border(rgui, frame_buf_data, fb_width, fb_height);
 }
 
-static void rgui_process_wallpaper(rgui_t *rgui, struct texture_image *image)
+static void rgui_process_wallpaper(
+      rgui_t *rgui,
+      struct texture_image *image)
 {
    unsigned x, y;
    unsigned x_crop_offset;
@@ -2234,10 +2267,10 @@ static void rgui_process_wallpaper(rgui_t *rgui, struct texture_image *image)
    frame_buf_t *background_buf = &rgui->background_buf;
 
    /* Sanity check */
-   if (!image->pixels ||
-       (image->width  < background_buf->width)  ||
-       (image->height < background_buf->height) ||
-       !background_buf->data)
+   if (     (!image->pixels)
+         || (image->width  < background_buf->width)
+         || (image->height < background_buf->height)
+         || (!background_buf->data))
       return;
 
    /* In most cases, image size will be identical
@@ -2266,9 +2299,9 @@ static void rgui_process_wallpaper(rgui_t *rgui, struct texture_image *image)
       }
    }
 
-   rgui->show_wallpaper = true;
    /* Tell menu that a display update is required */
-   rgui->force_redraw   = true;
+   rgui->flags         |= RGUI_FLAG_FORCE_REDRAW
+                        | RGUI_FLAG_SHOW_WALLPAPER;
 }
 
 static bool rgui_request_thumbnail(
@@ -2298,10 +2331,12 @@ static bool rgui_request_thumbnail(
          /* Would like to cancel any existing image load tasks
           * here, but can't see how to do it... */
          if (task_push_image_load(thumbnail->path,
-                  video_driver_supports_rgba(), 0,
-                  (thumbnail_id == GFX_THUMBNAIL_LEFT) ?
-            menu_display_handle_left_thumbnail_upload 
-            : menu_display_handle_thumbnail_upload, NULL))
+               video_driver_supports_rgba(),
+               0,
+               (thumbnail_id == GFX_THUMBNAIL_LEFT)
+                     ? menu_display_handle_left_thumbnail_upload
+                     : menu_display_handle_thumbnail_upload,
+               NULL))
          {
             *queue_size = *queue_size + 1;
             return true;
@@ -2318,7 +2353,8 @@ static bool rgui_request_thumbnail(
 
 static bool rgui_downscale_thumbnail(
       rgui_t *rgui,
-      unsigned max_width, unsigned max_height,
+      unsigned max_width,
+      unsigned max_height,
       unsigned thumbnail_downscaler,
       struct texture_image *image_src,
       struct texture_image *image_dst)
@@ -2328,8 +2364,10 @@ static bool rgui_downscale_thumbnail(
    /* Determine output dimensions */
    float display_aspect_ratio    = (float)max_width / (float)max_height;
    float         aspect_ratio    = (float)image_src->width / (float)image_src->height;
-   float core_aspect             = (thumbnail_core_aspect && video_st)
-         ? video_st->av_info.geometry.aspect_ratio : aspect_ratio;
+   float core_aspect             = (thumbnail_core_aspect
+         && video_st && video_st->av_info.geometry.aspect_ratio > 0)
+               ? video_st->av_info.geometry.aspect_ratio
+               : aspect_ratio;
 
    if (aspect_ratio > display_aspect_ratio)
    {
@@ -2349,8 +2387,10 @@ static bool rgui_downscale_thumbnail(
       }
 
       /* Account for any possible rounding errors... */
-      image_dst->height          = (image_dst->height < 1) ? 1 : image_dst->height;
-      image_dst->height          = (image_dst->height > max_height) ? max_height : image_dst->height;
+      if (image_dst->height < 1)
+         image_dst->height       = 1;
+      else if (image_dst->height > max_height)
+         image_dst->height       = max_height;
    }
    else
    {
@@ -2361,13 +2401,14 @@ static bool rgui_downscale_thumbnail(
          image_dst->width        = image_dst->width / (aspect_ratio / core_aspect);
 
       /* Account for any possible rounding errors... */
-      image_dst->width           = (image_dst->width < 1) ? 1 : image_dst->width;
-      image_dst->width           = (image_dst->width > max_width) ? max_width : image_dst->width;
+      if (image_dst->width < 1)
+         image_dst->width        = 1;
+      if (image_dst->width > max_width)
+         image_dst->width        = max_width;
    }
 
    /* Allocate pixel buffer */
-   image_dst->pixels             = (uint32_t*)calloc(image_dst->width * image_dst->height, sizeof(uint32_t));
-   if (!image_dst->pixels)
+   if (!(image_dst->pixels = (uint32_t*)calloc(image_dst->width * image_dst->height, sizeof(uint32_t))))
       return false;
 
    /* Determine scaling method */
@@ -2406,8 +2447,9 @@ static bool rgui_downscale_thumbnail(
       rgui->image_scaler.out_stride  = image_dst->width * sizeof(uint32_t);
       rgui->image_scaler.out_fmt     = SCALER_FMT_ARGB8888;
 
-      rgui->image_scaler.scaler_type = (thumbnail_downscaler == RGUI_THUMB_SCALE_SINC) ?
-         SCALER_TYPE_SINC : SCALER_TYPE_BILINEAR;
+      rgui->image_scaler.scaler_type = (thumbnail_downscaler == RGUI_THUMB_SCALE_SINC)
+            ? SCALER_TYPE_SINC
+            : SCALER_TYPE_BILINEAR;
 
       /* This reset is redundant, since scaler_ctx_gen_filter()
        * calls it - but do it anyway in case the
@@ -2431,7 +2473,8 @@ static bool rgui_downscale_thumbnail(
 }
 
 static void rgui_process_thumbnail(
-      rgui_t *rgui, thumbnail_t *thumbnail,
+      rgui_t *rgui,
+      thumbnail_t *thumbnail,
       uint32_t *queue_size,
       unsigned menu_rgui_thumbnail_downscaler,
       struct texture_image *image_src)
@@ -2459,9 +2502,12 @@ static void rgui_process_thumbnail(
    /* Downscale thumbnail if it exceeds maximum size limits */
    if ((image_src->width > thumbnail->max_width) || (image_src->height > thumbnail->max_height))
    {
-      if (!rgui_downscale_thumbnail(rgui, thumbnail->max_width, thumbnail->max_height,
-               menu_rgui_thumbnail_downscaler,
-               image_src, &image_resampled))
+      if (!rgui_downscale_thumbnail(rgui,
+            thumbnail->max_width,
+            thumbnail->max_height,
+            menu_rgui_thumbnail_downscaler,
+            image_src,
+            &image_resampled))
       {
          if (image_resampled.pixels)
             free(image_resampled.pixels);
@@ -2486,7 +2532,7 @@ static void rgui_process_thumbnail(
    thumbnail->is_valid    = true;
 
    /* Tell menu that a display update is required */
-   rgui->force_redraw     = true;
+   rgui->flags           |= RGUI_FLAG_FORCE_REDRAW;
 
    /* Clean up */
    image                  = NULL;
@@ -2495,7 +2541,10 @@ static void rgui_process_thumbnail(
    image_resampled.pixels = NULL;
 }
 
-static bool rgui_load_image(void *userdata, void *data, enum menu_image_type type)
+static bool rgui_load_image(
+      void *userdata,
+      void *data,
+      enum menu_image_type type)
 {
    rgui_t *rgui         = (rgui_t*)userdata;
 
@@ -2536,11 +2585,11 @@ static bool rgui_load_image(void *userdata, void *data, enum menu_image_type typ
             struct texture_image *image             = (struct texture_image*)data;
             settings_t *settings                    = config_get_ptr();
             bool menu_rgui_inline_thumbnails        =
-               settings->bools.menu_rgui_inline_thumbnails;
+                  settings->bools.menu_rgui_inline_thumbnails;
             unsigned menu_rgui_thumbnail_downscaler =
-               settings->uints.menu_rgui_thumbnail_downscaler;
+                  settings->uints.menu_rgui_thumbnail_downscaler;
             
-            if (rgui->show_fs_thumbnail)
+            if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
                rgui_process_thumbnail(rgui, &rgui->fs_thumbnail, &rgui->thumbnail_queue_size,
                      menu_rgui_thumbnail_downscaler,
                      image);
@@ -2565,18 +2614,22 @@ static bool rgui_load_image(void *userdata, void *data, enum menu_image_type typ
             struct texture_image *image             = (struct texture_image*)data;
             settings_t *settings                    = config_get_ptr();
             bool menu_rgui_inline_thumbnails        =
-               settings->bools.menu_rgui_inline_thumbnails;
+                  settings->bools.menu_rgui_inline_thumbnails;
             bool savestate_thumbnail_enable         =
-               settings->bools.savestate_thumbnail_enable;
+                  settings->bools.savestate_thumbnail_enable;
             unsigned menu_rgui_thumbnail_downscaler =
-               settings->uints.menu_rgui_thumbnail_downscaler;
+                  settings->uints.menu_rgui_thumbnail_downscaler;
 
-            if (rgui->show_fs_thumbnail)
-               rgui_process_thumbnail(rgui, &rgui->fs_thumbnail, &rgui->left_thumbnail_queue_size,
+            if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+               rgui_process_thumbnail(rgui,
+                     &rgui->fs_thumbnail,
+                     &rgui->left_thumbnail_queue_size,
                      menu_rgui_thumbnail_downscaler,
                      image);
             else if (menu_rgui_inline_thumbnails || savestate_thumbnail_enable)
-               rgui_process_thumbnail(rgui, &rgui->mini_left_thumbnail, &rgui->left_thumbnail_queue_size,
+               rgui_process_thumbnail(rgui,
+                     &rgui->mini_left_thumbnail,
+                     &rgui->left_thumbnail_queue_size,
                      menu_rgui_thumbnail_downscaler,
                      image);
             else
@@ -2593,22 +2646,24 @@ static bool rgui_load_image(void *userdata, void *data, enum menu_image_type typ
    return true;
 }
 
-static void rgui_render_background(rgui_t *rgui,
-      unsigned fb_width, unsigned fb_height,
+static void rgui_render_background(
+      rgui_t *rgui,
+      unsigned fb_width,
+      unsigned fb_height,
       size_t fb_pitch)
 {
    frame_buf_t *frame_buf      = &rgui->frame_buf;
    frame_buf_t *background_buf = &rgui->background_buf;
 
    /* Sanity check */
-   if (!frame_buf->data ||
-       (fb_width != frame_buf->width) ||
-       (fb_height != frame_buf->height) ||
-       (fb_pitch != frame_buf->width << 1))
+   if (     !frame_buf->data
+         || (fb_width != frame_buf->width)
+         || (fb_height != frame_buf->height)
+         || (fb_pitch != frame_buf->width << 1))
       return;
 
    /* If screensaver is active, 'zero out' framebuffer */
-   if (rgui->show_screensaver)
+   if (rgui->flags & RGUI_FLAG_SHOW_SCREENSAVER)
    {
       size_t i;
       uint16_t ss_bg_color    = rgui->colors.ss_bg_color;
@@ -2623,8 +2678,11 @@ static void rgui_render_background(rgui_t *rgui,
             (size_t)frame_buf->width * (size_t)frame_buf->height * sizeof(uint16_t));
 }
 
-static void rgui_render_fs_thumbnail(rgui_t *rgui,
-      unsigned fb_width, unsigned fb_height, size_t fb_pitch)
+static void rgui_render_fs_thumbnail(
+      rgui_t *rgui,
+      unsigned fb_width,
+      unsigned fb_height,
+      size_t fb_pitch)
 {
    uint16_t *frame_buf_data    = rgui->frame_buf.data;
    uint16_t *fs_thumbnail_data = rgui->fs_thumbnail.data;
@@ -2680,7 +2738,7 @@ static void rgui_render_fs_thumbnail(rgui_t *rgui,
       }
 
       /* Draw drop shadow, if required */
-      if (rgui->shadow_enable)
+      if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
       {
          unsigned shadow_x;
          unsigned shadow_y;
@@ -2690,9 +2748,12 @@ static void rgui_render_fs_thumbnail(rgui_t *rgui,
          /* Vertical component */
          if (fs_thumbnail_width < fb_width)
          {
-            shadow_width  = fb_width - fs_thumbnail_width;
-            shadow_width  = shadow_width > 2 ? 2 : shadow_width;
-            shadow_height = fs_thumbnail_height + 2 < fb_height ? fs_thumbnail_height : fb_height - 2;
+            shadow_width     = fb_width - fs_thumbnail_width;
+            if (shadow_width > 2)
+               shadow_width  = 2;
+            shadow_height    = (fs_thumbnail_height + 2 < fb_height)
+                  ? fs_thumbnail_height
+                  : fb_height - 2;
 
             shadow_x      = fb_x_offset + fs_thumbnail_width;
             shadow_y      = fb_y_offset + 2;
@@ -2704,12 +2765,15 @@ static void rgui_render_fs_thumbnail(rgui_t *rgui,
          /* Horizontal component */
          if (fs_thumbnail_height < fb_height)
          {
-            shadow_height = fb_height - fs_thumbnail_height;
-            shadow_height = shadow_height > 2 ? 2 : shadow_height;
-            shadow_width  = fs_thumbnail_width + 2 < fb_width ? fs_thumbnail_width : fb_width - 2;
+            shadow_height    = fb_height - fs_thumbnail_height;
+            if (shadow_height > 2)
+               shadow_height = 2;
+            shadow_width     = (fs_thumbnail_width + 2 < fb_width) 
+               ? fs_thumbnail_width 
+               : fb_width - 2;
 
-            shadow_x      = fb_x_offset + 2;
-            shadow_y      = fb_y_offset + fs_thumbnail_height;
+            shadow_x         = fb_x_offset + 2;
+            shadow_y         = fb_y_offset + fs_thumbnail_height;
 
             rgui_color_rect(frame_buf_data, fb_width, fb_height,
                   shadow_x, shadow_y, shadow_width, shadow_height, rgui->colors.shadow_color);
@@ -2726,11 +2790,14 @@ static unsigned INLINE rgui_get_mini_thumbnail_fullwidth(rgui_t *rgui)
 }
 
 static void rgui_render_mini_thumbnail(
-      rgui_t *rgui, thumbnail_t *thumbnail,
+      rgui_t *rgui,
+      thumbnail_t *thumbnail,
       uint16_t *frame_buf_data,
       enum gfx_thumbnail_id thumbnail_id,
-      unsigned fb_width, unsigned fb_height,
-      size_t fb_pitch, bool menu_rgui_swap_thumbnails)
+      unsigned fb_width,
+      unsigned fb_height,
+      size_t fb_pitch,
+      bool menu_rgui_swap_thumbnails)
 {
    if (thumbnail->is_valid && frame_buf_data && thumbnail->data)
    {
@@ -2751,8 +2818,8 @@ static void rgui_render_mini_thumbnail(
       fb_x_offset = (rgui->term_layout.start_x + term_width) -
             (thumbnail->width + ((thumbnail_fullwidth - thumbnail->width) >> 1));
       
-      if (((thumbnail_id == GFX_THUMBNAIL_RIGHT) && !menu_rgui_swap_thumbnails) ||
-          ((thumbnail_id == GFX_THUMBNAIL_LEFT)  &&  menu_rgui_swap_thumbnails))
+      if (     ((thumbnail_id == GFX_THUMBNAIL_RIGHT) && !menu_rgui_swap_thumbnails)
+            || ((thumbnail_id == GFX_THUMBNAIL_LEFT)  &&  menu_rgui_swap_thumbnails))
          fb_y_offset = rgui->term_layout.start_y + ((thumbnail->max_height - thumbnail->height) >> 1);
       else
          fb_y_offset = (rgui->term_layout.start_y + term_height) -
@@ -2769,7 +2836,7 @@ static void rgui_render_mini_thumbnail(
       }
 
       /* Draw drop shadow, if required */
-      if (rgui->shadow_enable)
+      if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
       {
          rgui_color_rect(frame_buf_data, fb_width, fb_height,
                fb_x_offset + thumbnail->width, fb_y_offset + 1,
@@ -2781,163 +2848,165 @@ static void rgui_render_mini_thumbnail(
    }
 }
 
-static const rgui_theme_t *get_theme(rgui_t *rgui)
+static const rgui_theme_t *rgui_get_theme(rgui_t *rgui)
 {
-   bool transparent = rgui->transparency_supported &&
-         rgui->transparency_enable;
+   bool transparent = (rgui->flags & RGUI_FLAG_TRANSPARENCY_SUPPORTED)
+                   && (rgui->flags & RGUI_FLAG_TRANSPARENCY_ENABLE);
 
    switch (rgui->color_theme)
    {
       case RGUI_THEME_CLASSIC_RED:
-         return transparent ?
-               &rgui_theme_classic_red :
-               &rgui_theme_opaque_classic_red;
+         return transparent
+               ? &rgui_theme_classic_red
+               : &rgui_theme_opaque_classic_red;
       case RGUI_THEME_CLASSIC_ORANGE:
-         return transparent ?
-               &rgui_theme_classic_orange :
-               &rgui_theme_opaque_classic_orange;
+         return transparent
+               ? &rgui_theme_classic_orange
+               : &rgui_theme_opaque_classic_orange;
       case RGUI_THEME_CLASSIC_YELLOW:
-         return transparent ?
-               &rgui_theme_classic_yellow :
-               &rgui_theme_opaque_classic_yellow;
+         return transparent
+               ? &rgui_theme_classic_yellow
+               : &rgui_theme_opaque_classic_yellow;
       case RGUI_THEME_CLASSIC_GREEN:
-         return transparent ?
-               &rgui_theme_classic_green :
-               &rgui_theme_opaque_classic_green;
+         return transparent
+               ? &rgui_theme_classic_green
+               : &rgui_theme_opaque_classic_green;
       case RGUI_THEME_CLASSIC_BLUE:
-         return transparent ?
-               &rgui_theme_classic_blue :
-               &rgui_theme_opaque_classic_blue;
+         return transparent
+               ? &rgui_theme_classic_blue
+               : &rgui_theme_opaque_classic_blue;
       case RGUI_THEME_CLASSIC_VIOLET:
-         return transparent ?
-               &rgui_theme_classic_violet :
-               &rgui_theme_opaque_classic_violet;
+         return transparent
+               ? &rgui_theme_classic_violet
+               : &rgui_theme_opaque_classic_violet;
       case RGUI_THEME_CLASSIC_GREY:
-         return transparent ?
-               &rgui_theme_classic_grey :
-               &rgui_theme_opaque_classic_grey;
+         return transparent
+               ? &rgui_theme_classic_grey
+               : &rgui_theme_opaque_classic_grey;
       case RGUI_THEME_LEGACY_RED:
-         return transparent ?
-               &rgui_theme_legacy_red :
-               &rgui_theme_opaque_legacy_red;
+         return transparent
+               ? &rgui_theme_legacy_red
+               : &rgui_theme_opaque_legacy_red;
       case RGUI_THEME_DARK_PURPLE:
-         return transparent ?
-               &rgui_theme_dark_purple :
-               &rgui_theme_opaque_dark_purple;
+         return transparent
+               ? &rgui_theme_dark_purple
+               : &rgui_theme_opaque_dark_purple;
       case RGUI_THEME_MIDNIGHT_BLUE:
-         return transparent ?
-               &rgui_theme_midnight_blue :
-               &rgui_theme_opaque_midnight_blue;
+         return transparent
+               ? &rgui_theme_midnight_blue
+               : &rgui_theme_opaque_midnight_blue;
       case RGUI_THEME_GOLDEN:
-         return transparent ?
-               &rgui_theme_golden :
-               &rgui_theme_opaque_golden;
+         return transparent
+               ? &rgui_theme_golden
+               : &rgui_theme_opaque_golden;
       case RGUI_THEME_ELECTRIC_BLUE:
-         return transparent ?
-               &rgui_theme_electric_blue :
-               &rgui_theme_opaque_electric_blue;
+         return transparent
+               ? &rgui_theme_electric_blue
+               : &rgui_theme_opaque_electric_blue;
       case RGUI_THEME_APPLE_GREEN:
-         return transparent ?
-               &rgui_theme_apple_green :
-               &rgui_theme_opaque_apple_green;
+         return transparent
+               ? &rgui_theme_apple_green
+               : &rgui_theme_opaque_apple_green;
       case RGUI_THEME_VOLCANIC_RED:
-         return transparent ?
-               &rgui_theme_volcanic_red :
-               &rgui_theme_opaque_volcanic_red;
+         return transparent
+               ? &rgui_theme_volcanic_red
+               : &rgui_theme_opaque_volcanic_red;
       case RGUI_THEME_LAGOON:
-         return transparent ?
-               &rgui_theme_lagoon :
-               &rgui_theme_opaque_lagoon;
+         return transparent
+               ? &rgui_theme_lagoon
+               : &rgui_theme_opaque_lagoon;
       case RGUI_THEME_BROGRAMMER:
-         return transparent ?
-               &rgui_theme_brogrammer :
-               &rgui_theme_opaque_brogrammer;
+         return transparent
+               ? &rgui_theme_brogrammer
+               : &rgui_theme_opaque_brogrammer;
       case RGUI_THEME_DRACULA:
-         return transparent ?
-               &rgui_theme_dracula :
-               &rgui_theme_opaque_dracula;
+         return transparent
+               ? &rgui_theme_dracula
+               : &rgui_theme_opaque_dracula;
       case RGUI_THEME_FAIRYFLOSS:
-         return transparent ?
-               &rgui_theme_fairyfloss :
-               &rgui_theme_opaque_fairyfloss;
+         return transparent
+               ? &rgui_theme_fairyfloss
+               : &rgui_theme_opaque_fairyfloss;
       case RGUI_THEME_FLATUI:
-         return transparent ?
-               &rgui_theme_flatui :
-               &rgui_theme_opaque_flatui;
+         return transparent
+               ? &rgui_theme_flatui
+               : &rgui_theme_opaque_flatui;
       case RGUI_THEME_GRUVBOX_DARK:
-         return transparent ?
-               &rgui_theme_gruvbox_dark :
-               &rgui_theme_opaque_gruvbox_dark;
+         return transparent
+               ? &rgui_theme_gruvbox_dark
+               : &rgui_theme_opaque_gruvbox_dark;
       case RGUI_THEME_GRUVBOX_LIGHT:
-         return transparent ?
-               &rgui_theme_gruvbox_light :
-               &rgui_theme_opaque_gruvbox_light;
+         return transparent
+               ? &rgui_theme_gruvbox_light
+               : &rgui_theme_opaque_gruvbox_light;
       case RGUI_THEME_HACKING_THE_KERNEL:
-         return transparent ?
-               &rgui_theme_hacking_the_kernel :
-               &rgui_theme_opaque_hacking_the_kernel;
+         return transparent
+               ? &rgui_theme_hacking_the_kernel
+               : &rgui_theme_opaque_hacking_the_kernel;
       case RGUI_THEME_NORD:
-         return transparent ?
-               &rgui_theme_nord :
-               &rgui_theme_opaque_nord;
+         return transparent
+               ? &rgui_theme_nord
+               : &rgui_theme_opaque_nord;
       case RGUI_THEME_NOVA:
-         return transparent ?
-               &rgui_theme_nova :
-               &rgui_theme_opaque_nova;
+         return transparent
+               ? &rgui_theme_nova
+               : &rgui_theme_opaque_nova;
       case RGUI_THEME_ONE_DARK:
-         return transparent ?
-               &rgui_theme_one_dark :
-               &rgui_theme_opaque_one_dark;
+         return transparent
+               ? &rgui_theme_one_dark
+               : &rgui_theme_opaque_one_dark;
       case RGUI_THEME_PALENIGHT:
-         return transparent ?
-               &rgui_theme_palenight :
-               &rgui_theme_opaque_palenight;
+         return transparent
+               ? &rgui_theme_palenight
+               : &rgui_theme_opaque_palenight;
       case RGUI_THEME_SOLARIZED_DARK:
-         return transparent ?
-               &rgui_theme_solarized_dark :
-               &rgui_theme_opaque_solarized_dark;
+         return transparent
+               ? &rgui_theme_solarized_dark
+               : &rgui_theme_opaque_solarized_dark;
       case RGUI_THEME_SOLARIZED_LIGHT:
-         return transparent ?
-               &rgui_theme_solarized_light :
-               &rgui_theme_opaque_solarized_light;
+         return transparent
+               ? &rgui_theme_solarized_light
+               : &rgui_theme_opaque_solarized_light;
       case RGUI_THEME_TANGO_DARK:
-         return transparent ?
-               &rgui_theme_tango_dark :
-               &rgui_theme_opaque_tango_dark;
+         return transparent
+               ? &rgui_theme_tango_dark
+               : &rgui_theme_opaque_tango_dark;
       case RGUI_THEME_TANGO_LIGHT:
-         return transparent ?
-               &rgui_theme_tango_light :
-               &rgui_theme_opaque_tango_light;
+         return transparent
+               ? &rgui_theme_tango_light
+               : &rgui_theme_opaque_tango_light;
       case RGUI_THEME_ZENBURN:
-         return transparent ?
-               &rgui_theme_zenburn :
-               &rgui_theme_opaque_zenburn;
+         return transparent
+               ? &rgui_theme_zenburn
+               : &rgui_theme_opaque_zenburn;
       case RGUI_THEME_ANTI_ZENBURN:
-         return transparent ?
-               &rgui_theme_anti_zenburn :
-               &rgui_theme_opaque_anti_zenburn;
+         return transparent
+               ? &rgui_theme_anti_zenburn
+               : &rgui_theme_opaque_anti_zenburn;
       case RGUI_THEME_FLUX:
-         return transparent ?
-               &rgui_theme_flux :
-               &rgui_theme_opaque_flux;
+         return transparent
+               ? &rgui_theme_flux
+               : &rgui_theme_opaque_flux;
       case RGUI_THEME_GRAY_DARK:
-         return transparent ?
-               &rgui_theme_gray_dark :
-               &rgui_theme_opaque_gray_dark;
+         return transparent
+               ? &rgui_theme_gray_dark
+               : &rgui_theme_opaque_gray_dark;
       case RGUI_THEME_GRAY_LIGHT:
-         return transparent ?
-               &rgui_theme_gray_light :
-               &rgui_theme_opaque_gray_light;
+         return transparent
+               ? &rgui_theme_gray_light
+               : &rgui_theme_opaque_gray_light;
       default:
          break;
    }
 
-   return transparent ?
-         &rgui_theme_classic_green :
-         &rgui_theme_opaque_classic_green;
+   return transparent
+         ? &rgui_theme_classic_green
+         : &rgui_theme_opaque_classic_green;
 }
 
-static void update_dynamic_theme_path(rgui_t *rgui, const char *theme_dir)
+static void rgui_update_dynamic_theme_path(
+      rgui_t *rgui,
+      const char *theme_dir)
 {
    bool use_playlist_theme = false;
 
@@ -2947,7 +3016,8 @@ static void update_dynamic_theme_path(rgui_t *rgui, const char *theme_dir)
       return;
    }
 
-   if (rgui->is_playlist && !string_is_empty(rgui->menu_title))
+   if (     (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+         && (!string_is_empty(rgui->menu_title)))
    {
       size_t len = fill_pathname_join_special(rgui->theme_dynamic_path, theme_dir,
             rgui->menu_title, sizeof(rgui->theme_dynamic_path));
@@ -2966,7 +3036,8 @@ static void update_dynamic_theme_path(rgui_t *rgui, const char *theme_dir)
 }
 
 static void rgui_load_custom_theme(
-      rgui_t *rgui, rgui_theme_t *theme_colors,
+      rgui_t *rgui,
+      rgui_theme_t *theme_colors,
       const char *theme_path,
       unsigned menu_rgui_aspect_ratio)
 {
@@ -3090,16 +3161,20 @@ end:
              * here - in general, wallpaper is loaded once per session
              * and then forgotten, so performance issues are not a concern */
             task_push_image_load(wallpaper_path,
-                  video_driver_supports_rgba(), 0,
-                  menu_display_handle_wallpaper_upload, NULL);
+                  video_driver_supports_rgba(),
+                  0,
+                  menu_display_handle_wallpaper_upload,
+                  NULL);
       }
    }
    else
    {
       /* Use 'Classic Green' fallback */
       const rgui_theme_t *fallback_theme =
-            (rgui->transparency_supported && rgui->transparency_enable) ?
-                  &rgui_theme_classic_green : &rgui_theme_opaque_classic_green;
+            (   (rgui->flags & RGUI_FLAG_TRANSPARENCY_SUPPORTED)
+             && (rgui->flags & RGUI_FLAG_TRANSPARENCY_ENABLE))
+                  ? &rgui_theme_classic_green 
+                  : &rgui_theme_opaque_classic_green;
 
       theme_colors->normal_color       = fallback_theme->normal_color;
       theme_colors->hover_color        = fallback_theme->hover_color;
@@ -3117,29 +3192,34 @@ end:
    conf = NULL;
 }
 
-static void rgui_cache_background(rgui_t *rgui,
-      unsigned fb_width, unsigned fb_height, size_t fb_pitch)
+static void rgui_cache_background(
+      rgui_t *rgui,
+      unsigned fb_width,
+      unsigned fb_height,
+      size_t fb_pitch)
 {
    frame_buf_t *background_buf = &rgui->background_buf;
 
    /* Sanity check */
-   if ((fb_width  != background_buf->width)      ||
-       (fb_height != background_buf->height)     ||
-       (fb_pitch  != background_buf->width << 1) ||
-       !background_buf->data)
+   if (     (fb_width  != background_buf->width)
+         || (fb_height != background_buf->height)
+         || (fb_pitch  != background_buf->width << 1)
+         || !background_buf->data)
       return;
 
    /* Fill background buffer with standard chequer pattern */
    rgui_fill_rect(background_buf->data, fb_width, fb_height,
          0, 0, fb_width, fb_height,
-         rgui->colors.bg_dark_color, rgui->colors.bg_light_color, rgui->bg_thickness);
+         rgui->colors.bg_dark_color, rgui->colors.bg_light_color,
+         rgui->flags & RGUI_FLAG_BG_THICKNESS);
 
    /* Draw border, if required */
-   if (rgui->border_enable)
+   if (rgui->flags & RGUI_FLAG_BORDER_ENABLE)
       rgui_render_border(rgui, background_buf->data, fb_width, fb_height);
 }
 
-static void prepare_rgui_colors(rgui_t *rgui, 
+static void rgui_prepare_colors(
+      rgui_t *rgui,
       unsigned menu_rgui_color_theme,
       const char *path_rgui_theme_preset,
       bool menu_rgui_transparency,
@@ -3147,10 +3227,14 @@ static void prepare_rgui_colors(rgui_t *rgui,
 {
    rgui_theme_t theme_colors;
    uint32_t ss_particle_color_argb32  = 0;
+   uint32_t disabled_color_argb32     = 0;
 
-   rgui->color_theme                  = menu_rgui_color_theme;
-   rgui->transparency_enable          = menu_rgui_transparency;
-   rgui->show_wallpaper               = false;
+   rgui->color_theme                  =  menu_rgui_color_theme;
+   rgui->flags                       &= ~RGUI_FLAG_SHOW_WALLPAPER;
+   if (menu_rgui_transparency)
+      rgui->flags                    |=  RGUI_FLAG_TRANSPARENCY_ENABLE;
+   else
+      rgui->flags                    &= ~RGUI_FLAG_TRANSPARENCY_ENABLE;
 
    if (rgui->color_theme == RGUI_THEME_CUSTOM)
    {
@@ -3170,7 +3254,7 @@ static void prepare_rgui_colors(rgui_t *rgui,
    }
    else
    {
-      const rgui_theme_t *current_theme = get_theme(rgui);
+      const rgui_theme_t *current_theme = rgui_get_theme(rgui);
 
       theme_colors.hover_color          = current_theme->hover_color;
       theme_colors.normal_color         = current_theme->normal_color;
@@ -3206,17 +3290,24 @@ static void prepare_rgui_colors(rgui_t *rgui,
    rgui->colors.ss_particle_color       = argb32_to_pixel_platform_format(
          ss_particle_color_argb32 | 0xFF000000);
 
-   rgui->bg_modified                    = true;
-   rgui->force_redraw                   = true;
+   /* Disabled color is a mix of normal color and shadow color, with 50% opacity */
+   disabled_color_argb32                = (theme_colors.normal_color +
+         theme_colors.shadow_color +
+               (theme_colors.normal_color ^ theme_colors.shadow_color)) >> 1;
+   rgui->colors.disabled_color          = argb32_to_pixel_platform_format(
+         disabled_color_argb32 | 0x7F000000);
+
+   rgui->flags                         |= RGUI_FLAG_BG_MODIFIED
+                                        | RGUI_FLAG_FORCE_REDRAW;
 }
 
 /* ==============================
- * blit_line/symbol() START
+ * rgui_blit_line/rgui_blit_symbol() START
  * ============================== */
 
 /* NOTE 1: These functions are WET (Write Everything Twice).
  * This is bad design and difficult to maintain, but we have
- * no other choice here. blit_line() is so performance
+ * no other choice here. rgui_blit_line() is so performance
  * critical that we simply cannot afford to check user
  * settings internally. */
 
@@ -3241,12 +3332,16 @@ static void prepare_rgui_colors(rgui_t *rgui,
  * are 'active' - but other devs should be very careful
  * when adding new fonts in the future */
 
-/* blit_line() */
+/* rgui_blit_line() */
 
-static void blit_line_regular(
+static void rgui_blit_line_regular(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data = rgui->frame_buf.data;
    bool **lut               = rgui->fonts.regular->lut;
@@ -3279,21 +3374,25 @@ static void blit_line_regular(
    }
 }
 
-static void blit_line_regular_shadow(
+static void rgui_blit_line_regular_shadow(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data = rgui->frame_buf.data;
    bool **lut               = rgui->fonts.regular->lut;
    uint16_t color_buf[2];
    uint16_t shadow_color_buf[2];
 
-   color_buf[0] = color;
-   color_buf[1] = shadow_color;
+   color_buf[0]             = color;
+   color_buf[1]             = shadow_color;
 
-   shadow_color_buf[0] = shadow_color;
-   shadow_color_buf[1] = shadow_color;
+   shadow_color_buf[0]      = shadow_color;
+   shadow_color_buf[1]      = shadow_color;
 
    while (!string_is_empty(message))
    {
@@ -3332,10 +3431,14 @@ static void blit_line_regular_shadow(
    }
 }
 
-static void blit_line_extended(
+static void rgui_blit_line_extended(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data = rgui->frame_buf.data;
    bool **lut               = rgui->fonts.regular->lut;
@@ -3382,10 +3485,14 @@ static void blit_line_extended(
    }
 }
 
-static void blit_line_extended_shadow(
+static void rgui_blit_line_extended_shadow(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t color_buf[2];
    uint16_t shadow_color_buf[2];
@@ -3450,10 +3557,14 @@ static void blit_line_extended_shadow(
 }
 
 #ifdef HAVE_LANGEXTRA
-static void blit_line_cjk(
+static void rgui_blit_line_cjk(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data   = rgui->frame_buf.data;
    bitmapfont_lut_t *font_eng = rgui->fonts.eng_10x10;
@@ -3506,10 +3617,14 @@ static void blit_line_cjk(
    }
 }
 
-static void blit_line_cjk_shadow(
+static void rgui_blit_line_cjk_shadow(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t color_buf[2];
    uint16_t shadow_color_buf[2];
@@ -3579,10 +3694,14 @@ static void blit_line_cjk_shadow(
    }
 }
 
-static void blit_line_rus(
+static void rgui_blit_line_rus(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data   = rgui->frame_buf.data;
    bitmapfont_lut_t *font_eng = rgui->fonts.eng_10x10;
@@ -3629,10 +3748,14 @@ static void blit_line_rus(
    }
 }
 
-static void blit_line_rus_shadow(
+static void rgui_blit_line_rus_shadow(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t color_buf[2];
    uint16_t shadow_color_buf[2];
@@ -3696,10 +3819,14 @@ static void blit_line_rus_shadow(
    }
 }
 
-static void blit_line_6x10(
+static void rgui_blit_line_6x10(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t *frame_buf_data   = rgui->frame_buf.data;
    bitmapfont_lut_t *font_eng = rgui->fonts.eng_6x10;
@@ -3740,10 +3867,14 @@ static void blit_line_6x10(
    }
 }
 
-static void blit_line_6x10_shadow(
+static void rgui_blit_line_6x10_shadow(
       rgui_t *rgui,
-      unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color)
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    uint16_t color_buf[2];
    uint16_t shadow_color_buf[2];
@@ -3802,10 +3933,16 @@ static void blit_line_6x10_shadow(
 }
 #endif
 
-static void (*blit_line)(rgui_t *rgui, unsigned fb_width, int x, int y,
-      const char *message, uint16_t color, uint16_t shadow_color) = blit_line_regular;
+static void (*rgui_blit_line)(
+      rgui_t *rgui,
+      unsigned fb_width,
+      int x,
+      int y,
+      const char *message,
+      uint16_t color,
+      uint16_t shadow_color) = rgui_blit_line_regular;
 
-/* blit_symbol() */
+/* rgui_blit_symbol() */
 
 static const uint8_t *rgui_get_symbol_data(enum rgui_symbol_type symbol)
 {
@@ -4089,8 +4226,14 @@ static const uint8_t *rgui_get_symbol_data(enum rgui_symbol_type symbol)
 	return NULL;
 }
 
-static void blit_symbol_regular(rgui_t *rgui, unsigned fb_width, int x, int y,
-      enum rgui_symbol_type symbol, uint16_t color, uint16_t shadow_color)
+static void rgui_blit_symbol_regular(
+      rgui_t *rgui,
+      unsigned fb_width,
+      int x,
+      int y,
+      enum rgui_symbol_type symbol,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    unsigned i, j;
    uint16_t *frame_buf_data   = rgui->frame_buf.data;
@@ -4111,8 +4254,14 @@ static void blit_symbol_regular(rgui_t *rgui, unsigned fb_width, int x, int y,
    }
 }
 
-static void blit_symbol_shadow(rgui_t *rgui, unsigned fb_width, int x, int y,
-      enum rgui_symbol_type symbol, uint16_t color, uint16_t shadow_color)
+static void rgui_blit_symbol_shadow(
+      rgui_t *rgui,
+      unsigned fb_width,
+      int x,
+      int y,
+      enum rgui_symbol_type symbol,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    unsigned i, j;
    uint16_t color_buf[2];
@@ -4150,11 +4299,19 @@ static void blit_symbol_shadow(rgui_t *rgui, unsigned fb_width, int x, int y,
    }
 }
 
-static void (*blit_symbol)(rgui_t *rgui, unsigned fb_width, int x, int y,
-      enum rgui_symbol_type symbol, uint16_t color, uint16_t shadow_color) = blit_symbol_regular;
+static void (*rgui_blit_symbol)(
+      rgui_t *rgui,
+      unsigned fb_width,
+      int x,
+      int y,
+      enum rgui_symbol_type symbol,
+      uint16_t color,
+      uint16_t shadow_color) = rgui_blit_symbol_regular;
 
-static void rgui_set_blit_functions(unsigned language,
-      bool draw_shadow, bool extended_ascii)
+static void rgui_set_blit_functions(
+      unsigned language,
+      bool draw_shadow,
+      bool extended_ascii)
 {
    if (draw_shadow)
    {
@@ -4165,33 +4322,34 @@ static void rgui_set_blit_functions(unsigned language,
          case RETRO_LANGUAGE_KOREAN:
          case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
          case RETRO_LANGUAGE_CHINESE_TRADITIONAL:
-            blit_line = blit_line_cjk_shadow;
+            rgui_blit_line    = rgui_blit_line_cjk_shadow;
             break;
          case RETRO_LANGUAGE_RUSSIAN:
-            blit_line = blit_line_rus_shadow;
+            rgui_blit_line    = rgui_blit_line_rus_shadow;
             break;
          case RETRO_LANGUAGE_ESPERANTO:
          case RETRO_LANGUAGE_POLISH:
          case RETRO_LANGUAGE_TURKISH:
          case RETRO_LANGUAGE_SLOVAK:
          case RETRO_LANGUAGE_CZECH:
-            blit_line = blit_line_6x10_shadow;
+         case RETRO_LANGUAGE_HUNGARIAN:
+            rgui_blit_line    = rgui_blit_line_6x10_shadow;
             break;
          default:
             if (extended_ascii)
-               blit_line = blit_line_extended_shadow;
+               rgui_blit_line = rgui_blit_line_extended_shadow;
             else
-               blit_line = blit_line_regular_shadow;
+               rgui_blit_line = rgui_blit_line_regular_shadow;
             break;
       }
 #else
       if (extended_ascii)
-         blit_line = blit_line_extended_shadow;
+         rgui_blit_line       = rgui_blit_line_extended_shadow;
       else
-         blit_line = blit_line_regular_shadow;
+         rgui_blit_line       = rgui_blit_line_regular_shadow;
 #endif
       
-      blit_symbol = blit_symbol_shadow;
+      rgui_blit_symbol        = rgui_blit_symbol_shadow;
    }
    else
    {
@@ -4202,38 +4360,39 @@ static void rgui_set_blit_functions(unsigned language,
          case RETRO_LANGUAGE_KOREAN:
          case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
          case RETRO_LANGUAGE_CHINESE_TRADITIONAL:
-            blit_line = blit_line_cjk;
+            rgui_blit_line = rgui_blit_line_cjk;
             break;
          case RETRO_LANGUAGE_RUSSIAN:
-            blit_line = blit_line_rus;
+            rgui_blit_line = rgui_blit_line_rus;
             break;
          case RETRO_LANGUAGE_ESPERANTO:
          case RETRO_LANGUAGE_POLISH:
          case RETRO_LANGUAGE_TURKISH:
          case RETRO_LANGUAGE_SLOVAK:
          case RETRO_LANGUAGE_CZECH:
-            blit_line = blit_line_6x10;
+         case RETRO_LANGUAGE_HUNGARIAN:
+            rgui_blit_line = rgui_blit_line_6x10;
             break;
          default:
             if (extended_ascii)
-               blit_line = blit_line_extended;
+               rgui_blit_line = rgui_blit_line_extended;
             else
-               blit_line = blit_line_regular;
+               rgui_blit_line = rgui_blit_line_regular;
             break;
       }
 #else
       if (extended_ascii)
-         blit_line = blit_line_extended;
+         rgui_blit_line = rgui_blit_line_extended;
       else
-         blit_line = blit_line_regular;
+         rgui_blit_line = rgui_blit_line_regular;
 #endif
       
-      blit_symbol = blit_symbol_regular;
+      rgui_blit_symbol  = rgui_blit_symbol_regular;
    }
 }
 
 /* ==============================
- * blit_line/symbol() END
+ * rgui_blit_line/rgui_blit_symbol() END
  * ============================== */
 
 static void rgui_set_message(void *data, const char *message)
@@ -4248,11 +4407,14 @@ static void rgui_set_message(void *data, const char *message)
    if (!string_is_empty(message))
       strlcpy(rgui->msgbox, message, sizeof(rgui->msgbox));
 
-   rgui->force_redraw = true;
+   rgui->flags |= RGUI_FLAG_FORCE_REDRAW;
 }
 
-static void rgui_render_messagebox(rgui_t *rgui, const char *message,
-      unsigned fb_width, unsigned fb_height)
+static void rgui_render_messagebox(
+      rgui_t *rgui,
+      const char *message,
+      unsigned fb_width,
+      unsigned fb_height)
 {
    int x, y;
    size_t i;
@@ -4295,25 +4457,28 @@ static void rgui_render_messagebox(rgui_t *rgui, const char *message,
 
    if (height > fb_height)
       height                = fb_height;
-   x                        = (x < 0) ? 0 : x;
-   y                        = (y < 0) ? 0 : y;
+   if (x < 0)
+      x                     = 0;
+   if (y < 0)
+      y                     = 0;
 
    if (frame_buf_data)
    {
       uint16_t border_dark_color  = rgui->colors.border_dark_color;
       uint16_t border_light_color = rgui->colors.border_light_color;
-      bool border_thickness       = rgui->border_thickness;
+      bool border_thickness       = rgui->flags & RGUI_FLAG_BORDER_THICKNESS;
 
       rgui_fill_rect(frame_buf_data, fb_width, fb_height,
             x + 5, y + 5, width - 10, height - 10,
-            rgui->colors.bg_dark_color, rgui->colors.bg_light_color, rgui->bg_thickness);
+            rgui->colors.bg_dark_color, rgui->colors.bg_light_color,
+            rgui->flags & RGUI_FLAG_BG_THICKNESS);
 
       /* Note: We draw borders around message boxes regardless
        * of the rgui->border_enable setting, because they look
        * ridiculous without... */
 
       /* Draw drop shadow, if required */
-      if (rgui->shadow_enable)
+      if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
       {
          uint16_t shadow_color = rgui->colors.shadow_color;
 
@@ -4355,7 +4520,7 @@ static void rgui_render_messagebox(rgui_t *rgui, const char *message,
          if (text_y > (int)fb_height - 10 - (int)rgui->font_height_stride)
             break;
 
-         blit_line(rgui, fb_width, text_x, text_y, msg,
+         rgui_blit_line(rgui, fb_width, text_x, text_y, msg,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       }
    }
@@ -4363,63 +4528,53 @@ static void rgui_render_messagebox(rgui_t *rgui, const char *message,
    string_list_deinitialize(&list);
 }
 
-static int rgui_osk_ptr_at_pos(void *data, int x, int y,
-      unsigned width, unsigned height)
+static int rgui_osk_ptr_at_pos(
+      void *data,
+      int x,
+      int y,
+      unsigned width,
+      unsigned height)
 {
-   size_t key_index;
-   unsigned osk_x, osk_y;
-   unsigned key_width;
-   unsigned key_height;
-   unsigned ptr_width;
-   unsigned ptr_height;
-   unsigned keyboard_width;
-   unsigned keyboard_height;
-   unsigned keyboard_offset_y;
-   unsigned osk_width;
-   unsigned osk_height;
-   unsigned fb_width, fb_height;
-   unsigned key_text_offset_x  = 8;
-   unsigned key_text_offset_y  = 6;
-   unsigned ptr_offset_x       = 2;
-   unsigned ptr_offset_y       = 2;
-   unsigned keyboard_offset_x  = 10;
    /* This is a lazy copy/paste from rgui_render_osk(),
     * but it will do for now... */
    rgui_t *rgui                = (rgui_t*)data;
-   gfx_display_t *p_disp       = NULL;
 
-   if (!rgui)
-      return -1;
-   p_disp                      = disp_get_ptr();
-
-   key_width                   = rgui->font_width  + (key_text_offset_x * 2);
-   key_height                  = rgui->font_height + (key_text_offset_y * 2);
-   ptr_width                   = key_width  - (ptr_offset_x * 2);
-   ptr_height                  = key_height - (ptr_offset_y * 2);
-   keyboard_width              = key_width  * OSK_CHARS_PER_LINE;
-   keyboard_height             = key_height * 4;
-   keyboard_offset_y           = 10 + 15 + (2 * rgui->font_height_stride);
-   osk_width                   = keyboard_width + 20;
-   osk_height                  = keyboard_offset_y + keyboard_height + 10;
-
-   /* Get dimensions/layout */
-   fb_width                    = p_disp->framebuf_width;
-   fb_height                   = p_disp->framebuf_height;
-
-   osk_x                       = (fb_width  - osk_width)  / 2;
-   osk_y                       = (fb_height - osk_height) / 2;
-
-   for (key_index = 0; key_index < 44; key_index++)
+   if (rgui)
    {
-      unsigned key_row         = (unsigned)(key_index / OSK_CHARS_PER_LINE);
-      unsigned key_column      = (unsigned)(key_index - (key_row * OSK_CHARS_PER_LINE));
+      size_t key_index;
+      const unsigned key_text_offset_x  = 8;
+      const unsigned key_text_offset_y  = 6;
+      const unsigned ptr_offset_x       = 2;
+      const unsigned ptr_offset_y       = 2;
+      const unsigned keyboard_offset_x  = 10;
+      gfx_display_t *p_disp             = disp_get_ptr();
+      unsigned key_width                = rgui->font_width  +(key_text_offset_x * 2);
+      unsigned key_height               = rgui->font_height +(key_text_offset_y * 2);
+      unsigned ptr_width                = key_width  - (ptr_offset_x * 2);
+      unsigned ptr_height               = key_height - (ptr_offset_y * 2);
+      unsigned keyboard_width           = key_width  * OSK_CHARS_PER_LINE;
+      unsigned keyboard_height          = key_height * 4;
+      unsigned keyboard_offset_y        = 10 + 15 + (2 * rgui->font_height_stride);
+      unsigned osk_width                = keyboard_width + 20;
+      unsigned osk_height               = keyboard_offset_y + keyboard_height + 10;
+      /* Get dimensions/layout */
+      unsigned fb_width                 = p_disp->framebuf_width;
+      unsigned fb_height                = p_disp->framebuf_height;
+      unsigned osk_x                    = (fb_width  - osk_width)  / 2;
+      unsigned osk_y                    = (fb_height - osk_height) / 2;
 
-      unsigned osk_ptr_x       = osk_x + keyboard_offset_x + ptr_offset_x + (key_column * key_width);
-      unsigned osk_ptr_y       = osk_y + keyboard_offset_y + ptr_offset_y + (key_row    * key_height);
+      for (key_index = 0; key_index < 44; key_index++)
+      {
+         unsigned key_row         = (unsigned)(key_index / OSK_CHARS_PER_LINE);
+         unsigned key_column      = (unsigned)(key_index - (key_row * OSK_CHARS_PER_LINE));
 
-      if (x > osk_ptr_x && x < osk_ptr_x + ptr_width &&
-          y > osk_ptr_y && y < osk_ptr_y + ptr_height)
-         return (int)key_index;
+         unsigned osk_ptr_x       = osk_x + keyboard_offset_x + ptr_offset_x + (key_column * key_width);
+         unsigned osk_ptr_y       = osk_y + keyboard_offset_y + ptr_offset_y + (key_row    * key_height);
+
+         if (  x > osk_ptr_x && x < osk_ptr_x + ptr_width &&
+               y > osk_ptr_y && y < osk_ptr_y + ptr_height)
+            return (int)key_index;
+      }
    }
 
    return -1;
@@ -4431,7 +4586,8 @@ static void rgui_render_osk(
       gfx_animation_ctx_ticker_t *ticker,
       gfx_animation_ctx_ticker_smooth_t *ticker_smooth,
       bool use_smooth_ticker,
-      unsigned fb_width, unsigned fb_height)
+      unsigned fb_width,
+      unsigned fb_height)
 {
    size_t key_index;
    
@@ -4451,7 +4607,7 @@ static void rgui_render_osk(
    unsigned osk_x, osk_y;
    
    input_driver_state_t 
-      *input_st             = input_state_get_ptr();
+         *input_st          = input_state_get_ptr();
    int osk_ptr              = input_st->osk_ptr;
    char **osk_grid          = input_st->osk_grid;
    const char *input_str    = menu_input_dialog_get_buffer();
@@ -4500,17 +4656,18 @@ static void rgui_render_osk(
    /* Draw background */
    rgui_fill_rect(frame_buf_data, fb_width, fb_height,
          osk_x + 5, osk_y + 5, osk_width - 10, osk_height - 10,
-         rgui->colors.bg_dark_color, rgui->colors.bg_light_color, rgui->bg_thickness);
+         rgui->colors.bg_dark_color, rgui->colors.bg_light_color,
+         rgui->flags & RGUI_FLAG_BG_THICKNESS);
    
    /* Draw border */
-   if (rgui->border_enable)
+   if (rgui->flags & RGUI_FLAG_BORDER_ENABLE)
    {
       uint16_t border_dark_color  = rgui->colors.border_dark_color;
       uint16_t border_light_color = rgui->colors.border_light_color;
-      bool border_thickness       = rgui->border_thickness;
+      bool border_thickness       = rgui->flags & RGUI_FLAG_BORDER_THICKNESS;
       
       /* Draw drop shadow, if required */
-      if (rgui->shadow_enable)
+      if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
       {
          uint16_t shadow_color    = rgui->colors.shadow_color;
          
@@ -4579,10 +4736,11 @@ static void rgui_render_osk(
       }
 
       input_label_length = (unsigned)(utf8len(input_label_buf) * rgui->font_width_stride);
-      input_label_x      = ticker_x_offset + osk_x + input_offset_x + ((input_label_max_length * rgui->font_width_stride) - input_label_length) / 2;
+      input_label_x      = ticker_x_offset + osk_x + input_offset_x
+                           + ((input_label_max_length * rgui->font_width_stride) - input_label_length) / 2;
       input_label_y      = osk_y + input_offset_y;
       
-      blit_line(rgui, fb_width, input_label_x, input_label_y, input_label_buf,
+      rgui_blit_line(rgui, fb_width, input_label_x, input_label_y, input_label_buf,
             rgui->colors.normal_color, rgui->colors.shadow_color);
    }
    
@@ -4605,14 +4763,14 @@ static void rgui_render_osk(
       input_str_visible              = utf8skip(input_str, input_str_char_offset);
       
       if (!string_is_empty(input_str_visible))
-         blit_line(rgui, fb_width, input_str_x, input_str_y, input_str_visible,
+         rgui_blit_line(rgui, fb_width, input_str_x, input_str_y, input_str_visible,
                rgui->colors.hover_color, rgui->colors.shadow_color);
       
       /* Draw text cursor */
       text_cursor_x                  = osk_x + input_offset_x
                                        + (input_str_length * rgui->font_width_stride);
       
-      blit_symbol(rgui, fb_width, text_cursor_x, input_str_y, RGUI_SYMBOL_TEXT_CURSOR,
+      rgui_blit_symbol(rgui, fb_width, text_cursor_x, input_str_y, RGUI_SYMBOL_TEXT_CURSOR,
             rgui->colors.normal_color, rgui->colors.shadow_color);
    }
    
@@ -4628,44 +4786,44 @@ static void rgui_render_osk(
       const char *key_text = osk_grid[key_index];
       
       /* 'Command' keys use custom symbols - have to
-       * detect them and use blit_symbol(). Everything
+       * detect them and use rgui_blit_symbol(). Everything
        * else is plain text, and can be drawn directly
-       * using blit_line(). */
+       * using rgui_blit_line(). */
 #ifdef HAVE_LANGEXTRA
       if (     string_is_equal(key_text, "\xe2\x87\xa6")) /* backspace character */
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_BACKSPACE,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_BACKSPACE,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "\xe2\x8f\x8e")) /* return character */
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_ENTER,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_ENTER,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "\xe2\x87\xa7")) /* up arrow */
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_UP,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_UP,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "\xe2\x87\xa9")) /* down arrow */
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_DOWN,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_DOWN,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "\xe2\x8a\x95")) /* plus sign (next button) */
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_NEXT,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_NEXT,
                rgui->colors.normal_color, rgui->colors.shadow_color);
 #else
       if (     string_is_equal(key_text, "Bksp"))
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_BACKSPACE,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_BACKSPACE,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "Enter"))
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_ENTER,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_ENTER,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "Upper"))
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_UP,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_UP,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "Lower"))
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_DOWN,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_SHIFT_DOWN,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       else if (string_is_equal(key_text, "Next"))
-         blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_NEXT,
+         rgui_blit_symbol(rgui, fb_width, key_text_x, key_text_y, RGUI_SYMBOL_NEXT,
                rgui->colors.normal_color, rgui->colors.shadow_color);
 #endif
       else
-         blit_line(rgui, fb_width, key_text_x, key_text_y, key_text,
+         rgui_blit_line(rgui, fb_width, key_text_x, key_text_y, key_text,
                rgui->colors.normal_color, rgui->colors.shadow_color);
       
       /* Draw selection pointer */
@@ -4675,7 +4833,7 @@ static void rgui_render_osk(
          unsigned osk_ptr_y = osk_y + keyboard_offset_y + ptr_offset_y + (key_row    * key_height);
          
          /* Draw drop shadow, if required */
-         if (rgui->shadow_enable)
+         if (rgui->flags & RGUI_FLAG_SHADOW_ENABLE)
          {
             rgui_color_rect(frame_buf_data, fb_width, fb_height,
                   osk_ptr_x + 1, osk_ptr_y + 1, 1, ptr_height, rgui->colors.shadow_color);
@@ -4700,8 +4858,14 @@ static void rgui_render_osk(
    }
 }
 
-static void rgui_render_toggle_switch(rgui_t *rgui, unsigned fb_width, int x, int y,
-      bool on, uint16_t color, uint16_t shadow_color)
+static void rgui_render_toggle_switch(
+      rgui_t *rgui,
+      unsigned fb_width,
+      int x,
+      int y,
+      bool on,
+      uint16_t color,
+      uint16_t shadow_color)
 {
    int x_current = x;
 
@@ -4709,28 +4873,30 @@ static void rgui_render_toggle_switch(rgui_t *rgui, unsigned fb_width, int x, in
     * > Note that we indent the left/right symbols
     *   by 1 pixel, to avoid the gap that is normally
     *   present between symbols/characters */
-   blit_symbol(rgui, fb_width, x_current + 1, y,
+   rgui_blit_symbol(rgui, fb_width, x_current + 1, y,
          on ? RGUI_SYMBOL_SWITCH_ON_LEFT : RGUI_SYMBOL_SWITCH_OFF_LEFT,
          color, shadow_color);
    x_current += RGUI_SYMBOL_WIDTH_STRIDE;
 
-   blit_symbol(rgui, fb_width, x_current, y,
+   rgui_blit_symbol(rgui, fb_width, x_current, y,
          on ? RGUI_SYMBOL_SWITCH_ON_CENTRE : RGUI_SYMBOL_SWITCH_OFF_CENTRE,
          color, shadow_color);
    x_current += RGUI_SYMBOL_WIDTH_STRIDE;
 
-   blit_symbol(rgui, fb_width, x_current - 1, y,
+   rgui_blit_symbol(rgui, fb_width, x_current - 1, y,
          on ? RGUI_SYMBOL_SWITCH_ON_RIGHT : RGUI_SYMBOL_SWITCH_OFF_RIGHT,
          color, shadow_color);
 }
 
 static enum rgui_entry_value_type rgui_get_entry_value_type(
-      const char *entry_value, bool entry_checked,
+      const char *entry_value,
+      uint8_t entry_setting_type,
+      bool entry_checked,
       bool switch_icons_enabled)
 {
    if (!string_is_empty(entry_value))
    {
-      if (switch_icons_enabled)
+      if (switch_icons_enabled && entry_setting_type == ST_BOOL)
       {
          /* Toggle switch off */
          if (string_is_equal(entry_value, msg_hash_to_str(MENU_ENUM_LABEL_DISABLED)) ||
@@ -4752,12 +4918,16 @@ static enum rgui_entry_value_type rgui_get_entry_value_type(
 /* Need to forward declare this for the Wii build
  * (I'm not going to reorder the functions and mess
  * up the git diff for a single platform...) */
-static bool rgui_set_aspect_ratio(rgui_t *rgui, gfx_display_t *p_disp,
+static bool rgui_set_aspect_ratio(
+      rgui_t *rgui,
+      gfx_display_t *p_disp,
       bool delay_update);
 #endif
 
-static void rgui_render(void *data,
-      unsigned width, unsigned height,
+static void rgui_render(
+      void *data,
+      unsigned width,
+      unsigned height,
       bool is_idle)
 {
    gfx_animation_ctx_ticker_t ticker;
@@ -4774,10 +4944,11 @@ static void rgui_render(void *data,
    bool msg_force                 = false;
    bool fb_size_changed           = false;
    settings_t *settings           = config_get_ptr();
+   gfx_animation_t *p_anim        = anim_get_ptr();
+   gfx_display_t *p_disp          = disp_get_ptr();
    rgui_t *rgui                   = (rgui_t*)data;
    enum gfx_animation_ticker_type
-      menu_ticker_type            = (enum gfx_animation_ticker_type)
-         settings->uints.menu_ticker_type;
+         menu_ticker_type         = (enum gfx_animation_ticker_type)settings->uints.menu_ticker_type;
    bool rgui_inline_thumbnails    = settings->bools.menu_rgui_inline_thumbnails;
    bool menu_battery_level_enable = settings->bools.menu_battery_level_enable;
    bool use_smooth_ticker         = settings->bools.menu_ticker_smooth;
@@ -4790,16 +4961,17 @@ static void rgui_render(void *data,
    bool menu_core_enable          = settings->bools.menu_core_enable;
    bool menu_timedate_enable      = settings->bools.menu_timedate_enable;
    bool menu_rgui_swap_thumbnails = settings->bools.menu_rgui_swap_thumbnails;
-   float menu_rgui_particle_effect_speed      = settings->floats.menu_rgui_particle_effect_speed;
-   bool menu_rgui_particle_effect_screensaver = settings->bools.menu_rgui_particle_effect_screensaver;
-   bool current_display_cb                    = false;
+   float menu_rgui_particle_effect_speed
+                                  = settings->floats.menu_rgui_particle_effect_speed;
+   bool menu_rgui_particle_effect_screensaver
+                                  = settings->bools.menu_rgui_particle_effect_screensaver;
+   bool current_display_cb        = false;
 
-   bool show_fs_thumbnail                     =
-         rgui->show_fs_thumbnail &&
-         (rgui->entry_has_thumbnail || !string_is_empty(rgui->savestate_thumbnail_file_path)) &&
-         (rgui->fs_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
-   gfx_animation_t *p_anim                    = anim_get_ptr();
-   gfx_display_t *p_disp                      = disp_get_ptr();
+   bool show_fs_thumbnail         =
+            (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+         && (     (rgui->flags & RGUI_FLAG_ENTRY_HAS_THUMBNAIL)
+               || !string_is_empty(rgui->savestate_thumbnail_file_path))
+         && (rgui->fs_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
 
    /* Sanity check */
    if (!rgui || !rgui->frame_buf.data)
@@ -4813,14 +4985,14 @@ static void rgui_render(void *data,
    }
 
    /* Apply pending aspect ratio update */
-   if (rgui->aspect_update_pending)
+   if (rgui->flags & RGUI_FLAG_ASPECT_UPDATE_PENDING)
    {
       command_event(CMD_EVENT_VIDEO_SET_ASPECT_RATIO, NULL);
-      rgui->aspect_update_pending = false;
+      rgui->flags &= ~RGUI_FLAG_ASPECT_UPDATE_PENDING;
    }
 
    /* Refresh current menu, if required */
-   if (rgui->force_menu_refresh)
+   if (rgui->flags & RGUI_FLAG_FORCE_MENU_REFRESH)
    {
       bool refresh = false;
       menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
@@ -4830,16 +5002,16 @@ static void rgui_render(void *data,
        * refresh; skip rendering of the 'obsolete'
        * menu this frame, and force a redraw of the
        * updated menu on the next frame */
-      rgui->force_redraw       = true;
-      rgui->force_menu_refresh = false;
+      rgui->flags             |=  RGUI_FLAG_FORCE_REDRAW;
+      rgui->flags             &= ~RGUI_FLAG_FORCE_MENU_REFRESH;
       return;
    }
 
    current_display_cb = menu_input_dialog_get_display_kb();
 
-   if (!rgui->force_redraw)
+   if (!(rgui->flags & RGUI_FLAG_FORCE_REDRAW))
    {
-      msg_force = p_disp->msg_force;
+      msg_force = p_disp->flags & GFX_DISP_FLAG_MSG_FORCE;
 
       if (menu_entries_ctl(MENU_ENTRIES_CTL_NEEDS_REFRESH, NULL)
             && !msg_force)
@@ -4870,29 +5042,30 @@ static void rgui_render(void *data,
       rgui_set_aspect_ratio(rgui, p_disp, false);
 #endif
 
-   if (rgui->bg_modified || fb_size_changed)
+   if (     (rgui->flags & RGUI_FLAG_BG_MODIFIED)
+         || (fb_size_changed))
    {
       /* Only regenerate the background if we are *not*
        * currently showing a wallpaper image */
-      if (!rgui->show_wallpaper)
+      if (!(rgui->flags & RGUI_FLAG_SHOW_WALLPAPER))
          rgui_cache_background(rgui, fb_width, fb_height, fb_pitch);
 
       /* Reinitialise particle effect, if required */
-      if (fb_size_changed && 
-            (rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE))
+      if (      fb_size_changed
+            && (rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE))
          rgui_init_particle_effect(rgui, p_disp);
 
       rgui->last_width  = fb_width;
       rgui->last_height = fb_height;
    }
 
-   if (rgui->bg_modified)
-      rgui->bg_modified      = false;
+   if (rgui->flags & RGUI_FLAG_BG_MODIFIED)
+      rgui->flags           &= ~RGUI_FLAG_BG_MODIFIED;
 
-   p_disp->framebuf_dirty    = true;
+   p_disp->flags            |=  GFX_DISP_FLAG_FB_DIRTY;
    GFX_ANIMATION_CLEAR_ACTIVE(p_anim);
 
-   rgui->force_redraw        = false;
+   rgui->flags              &= ~RGUI_FLAG_FORCE_REDRAW;
 
    entries_end               = menu_entries_get_size();
 
@@ -4920,7 +5093,7 @@ static void rgui_render(void *data,
          unsigned new_ptr;
          menu_entries_ctl(MENU_ENTRIES_CTL_START_GET, &old_start);
 
-         /* Note: It's okay for this to go out of range
+         /* NOTE: It's okay for this to go out of range
           * (limits are checked in rgui_pointer_up()) */
          new_ptr = (unsigned)((rgui->pointer.y - rgui->term_layout.start_y) / rgui->font_height_stride) + old_start;
 
@@ -4933,11 +5106,13 @@ static void rgui_render(void *data,
          size_t start;
          int16_t scroll_y_max = bottom * rgui->font_height_stride;
 
-         rgui->scroll_y += -1 * rgui->pointer.dy;
-         rgui->scroll_y = (rgui->scroll_y < 0)            ? 0            : rgui->scroll_y;
-         rgui->scroll_y = (rgui->scroll_y > scroll_y_max) ? scroll_y_max : rgui->scroll_y;
+         rgui->scroll_y      += -1 * rgui->pointer.dy;
+         if (rgui->scroll_y < 0)
+            rgui->scroll_y    = 0;
+         if (rgui->scroll_y > scroll_y_max)
+            rgui->scroll_y    = scroll_y_max;
 
-         start = rgui->scroll_y / rgui->font_height_stride;
+         start                = rgui->scroll_y / rgui->font_height_stride;
          menu_entries_ctl(MENU_ENTRIES_CTL_SET_START, &start);
       }
    }
@@ -4967,7 +5142,7 @@ static void rgui_render(void *data,
 
    /* If screensaver is active, skip drawing of
     * text/thumbnails */
-   if (rgui->show_screensaver)
+   if (rgui->flags & RGUI_FLAG_SHOW_SCREENSAVER)
       return;
 
    /* We use a single ticker for all text animations,
@@ -5013,8 +5188,8 @@ static void rgui_render(void *data,
       rgui_render_fs_thumbnail(rgui, fb_width, fb_height, fb_pitch);
 
       /* Get thumbnail title */
-      if (gfx_thumbnail_get_label(rgui->thumbnail_path_data, &thumbnail_title) ||
-            is_state_slot)
+      if (     gfx_thumbnail_get_label(rgui->thumbnail_path_data, &thumbnail_title)
+            || is_state_slot)
       {
          /* State slot title */
          if (is_state_slot)
@@ -5030,7 +5205,7 @@ static void rgui_render(void *data,
                      config_get_ptr()->ints.state_slot);
                thumbnail_title = thumbnail_title_buf;
             }
-            else if (rgui->is_state_slot)
+            else if (rgui->flags & RGUI_FLAG_IS_STATE_SLOT)
             {
                snprintf(thumbnail_title_buf      + _len,
                      sizeof(thumbnail_title_buf) - _len,
@@ -5073,10 +5248,11 @@ static void rgui_render(void *data,
          /* Draw thumbnail title background */
          rgui_fill_rect(rgui->frame_buf.data, fb_width, fb_height,
                title_x - 5, 0, title_width + 10, rgui->font_height_stride,
-               rgui->colors.bg_dark_color, rgui->colors.bg_light_color, rgui->bg_thickness);
+               rgui->colors.bg_dark_color, rgui->colors.bg_light_color,
+               rgui->flags & RGUI_FLAG_BG_THICKNESS);
 
          /* Draw thumbnail title */
-         blit_line(rgui, fb_width, ticker_x_offset + title_x,
+         rgui_blit_line(rgui, fb_width, ticker_x_offset + title_x,
                1, thumbnail_title_buf,
                rgui->colors.hover_color, rgui->colors.shadow_color);
       }
@@ -5092,15 +5268,19 @@ static void rgui_render(void *data,
       unsigned title_y               = rgui->term_layout.start_y - rgui->font_height_stride;
       unsigned term_end_x            = rgui->term_layout.start_x + (rgui->term_layout.width * rgui->font_width_stride);
       unsigned timedate_x            = term_end_x - (5 * rgui->font_width_stride);
-      unsigned core_name_len         = menu_timedate_enable ?
-            ((timedate_x - rgui->term_layout.start_x) / rgui->font_width_stride) - 3 :
-                  rgui->term_layout.width - 1;
-      bool show_mini_thumbnails      = rgui_inline_thumbnails &&
-            (rgui->is_playlist || rgui->is_explore_list || (rgui->is_quick_menu && !menu_is_running_quick_menu()));
+      unsigned core_name_len         = menu_timedate_enable
+            ? ((timedate_x - rgui->term_layout.start_x) / rgui->font_width_stride) - 3
+            : rgui->term_layout.width - 1;
+      bool show_mini_thumbnails      = rgui_inline_thumbnails
+            && rgui->playlist_index >= 0
+            && (   (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+               ||  (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+               || ((rgui->is_quick_menu) && !menu_is_running_quick_menu()));
       bool show_thumbnail            = false;
       bool show_left_thumbnail       = false;
-      bool show_savestate_thumbnail  = (!string_is_empty(rgui->savestate_thumbnail_file_path) &&
-            (rgui->is_state_slot || (rgui->is_quick_menu && menu_is_running_quick_menu())));
+      bool show_savestate_thumbnail  = (!string_is_empty(rgui->savestate_thumbnail_file_path)
+            && (   (rgui->flags & RGUI_FLAG_IS_STATE_SLOT)
+               || ((rgui->is_quick_menu) && menu_is_running_quick_menu())));
       unsigned thumbnail_panel_width = 0;
       unsigned term_mid_point        = 0;
       size_t powerstate_len          = 0;
@@ -5109,17 +5289,20 @@ static void rgui_render(void *data,
       if (show_mini_thumbnails)
       {
          /* Get whether each thumbnail type is enabled */
-         show_thumbnail      = rgui->entry_has_thumbnail &&
-               (rgui->mini_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
-         show_left_thumbnail = rgui->entry_has_left_thumbnail &&
-               (rgui->mini_left_thumbnail.is_valid || (rgui->left_thumbnail_queue_size > 0));
+         show_thumbnail      = (rgui->flags & RGUI_FLAG_ENTRY_HAS_THUMBNAIL)
+               && (rgui->mini_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
+         show_left_thumbnail = (rgui->flags & RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL)
+               && (rgui->mini_left_thumbnail.is_valid || (rgui->left_thumbnail_queue_size > 0));
 
          /* Get maximum width of thumbnail 'panel' on right side
           * of screen */
          thumbnail_panel_width = rgui_get_mini_thumbnail_fullwidth(rgui);
 
-         if ((rgui->entry_has_thumbnail && rgui->thumbnail_queue_size > 0) ||
-             (rgui->entry_has_left_thumbnail && rgui->left_thumbnail_queue_size > 0))
+         if (    (  (rgui->flags & RGUI_FLAG_ENTRY_HAS_THUMBNAIL)
+                  && rgui->thumbnail_queue_size > 0)
+               ||
+                  ( (rgui->flags & RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL)
+                  && rgui->left_thumbnail_queue_size > 0))
             thumbnail_panel_width = rgui->mini_thumbnail_max_width;
 
          /* Index (relative to first displayed menu entry) of
@@ -5151,8 +5334,8 @@ static void rgui_render(void *data,
                unsigned powerstate_x;
                enum rgui_symbol_type powerstate_symbol;
                uint16_t powerstate_color = (powerstate.percent > RGUI_BATTERY_WARN_THRESHOLD || powerstate.charging) 
-                  ? rgui->colors.title_color 
-                  : rgui->colors.hover_color;
+                     ? rgui->colors.title_color 
+                     : rgui->colors.hover_color;
 
                if (powerstate.charging)
                   powerstate_symbol = RGUI_SYMBOL_CHARGING;
@@ -5179,11 +5362,11 @@ static void rgui_render(void *data,
                      (RGUI_SYMBOL_WIDTH_STRIDE + (powerstate_len * rgui->font_width_stride)));
 
                /* Draw symbol */
-               blit_symbol(rgui, fb_width, powerstate_x, title_y, powerstate_symbol,
-                           powerstate_color, rgui->colors.shadow_color);
+               rgui_blit_symbol(rgui, fb_width, powerstate_x, title_y, powerstate_symbol,
+                     powerstate_color, rgui->colors.shadow_color);
 
                /* Print text */
-               blit_line(rgui, fb_width,
+               rgui_blit_line(rgui, fb_width,
                      powerstate_x + RGUI_SYMBOL_WIDTH_STRIDE + rgui->font_width_stride, title_y,
                      percent_str, powerstate_color, rgui->colors.shadow_color);
 
@@ -5237,7 +5420,7 @@ static void rgui_render(void *data,
          if (title_len > title_max_len - (powerstate_len - 5))
             title_x -= (powerstate_len - 5) * rgui->font_width_stride / 2;
 
-      blit_line(rgui, fb_width, title_x, title_y,
+      rgui_blit_line(rgui, fb_width, title_x, title_y,
             title_buf, rgui->colors.title_color, rgui->colors.shadow_color);
 
       /* Print menu entries */
@@ -5256,26 +5439,26 @@ static void rgui_render(void *data,
          unsigned entry_value_len                    = 0;
          enum rgui_entry_value_type entry_value_type = RGUI_ENTRY_VALUE_NONE;
          bool entry_selected                         = (i == selection);
-         uint16_t entry_color                        = entry_selected ?
-               rgui->colors.hover_color : rgui->colors.normal_color;
+         uint16_t entry_color                        = entry_selected
+               ? rgui->colors.hover_color
+               : rgui->colors.normal_color;
 
          if (i > (selection + 100))
             continue;
 
-         entry_title_buf[0] = '\0';
-         type_str_buf[0]    = '\0';
+         entry_title_buf[0]  = '\0';
+         type_str_buf[0]     = '\0';
 
          /* Get current entry */
-         MENU_ENTRY_INIT(entry);
-         entry.path_enabled     = false;
-         entry.label_enabled    = false;
-         entry.sublabel_enabled = false;
+         MENU_ENTRY_INITIALIZE(entry);
+         entry.flags        |= MENU_ENTRY_FLAG_RICH_LABEL_ENABLED
+                             | MENU_ENTRY_FLAG_VALUE_ENABLED;
          menu_entry_get(&entry, 0, (unsigned)i, NULL, true);
 
          if (entry.enum_idx == MENU_ENUM_LABEL_CHEEVOS_PASSWORD)
-            entry_value         = entry.password_value;
+            entry_value      = entry.password_value;
          else
-            entry_value         = entry.value;
+            entry_value      = entry.value;
 
          /* Get base length of entry title field */
          entry_title_max_len = rgui->term_layout.width - (1 + 2);
@@ -5283,9 +5466,9 @@ static void rgui_render(void *data,
          /* If showing mini thumbnails, reduce title field length accordingly */
          if (show_mini_thumbnails)
          {
-            unsigned term_offset = rgui_swap_thumbnails 
-               ? (unsigned)(rgui->term_layout.height - (i - new_start) - 1)
-               : (i - new_start);
+            unsigned term_offset     = rgui_swap_thumbnails
+                  ? (unsigned)(rgui->term_layout.height - (i - new_start) - 1)
+                  : (i - new_start);
             unsigned thumbnail_width = 0;
 
             /* Note:
@@ -5319,7 +5502,10 @@ static void rgui_render(void *data,
 
          /* Get 'type' of entry value component */
          entry_value_type = rgui_get_entry_value_type(
-               entry_value, entry.checked, rgui_switch_icons);
+               entry_value,
+               entry.setting_type,
+               entry.flags & MENU_ENTRY_FLAG_CHECKED,
+               rgui_switch_icons);
 
          switch (entry_value_type)
          {
@@ -5328,14 +5514,13 @@ static void rgui_render(void *data,
                 * according to actual length of value string.
                 * Otherwise, use classic fixed widths 'rounded
                 * down' to current value_maxlen */
-               entry_value_len = rgui_full_width_layout ?
-                     (unsigned)utf8len(entry_value) :
-                           entry.spacing;
+               entry_value_len = rgui_full_width_layout
+                     ? (unsigned)utf8len(entry_value)
+                     : entry.spacing;
 
-               entry_value_len = (entry_value_len >
-                     rgui->term_layout.value_maxlen) ?
-                           rgui->term_layout.value_maxlen :
-                                 entry_value_len;
+               entry_value_len = (entry_value_len > rgui->term_layout.value_maxlen)
+                     ? rgui->term_layout.value_maxlen
+                     : entry_value_len;
 
                /* Update width of entry title field */
                entry_title_max_len -= entry_value_len + 2;
@@ -5347,9 +5532,11 @@ static void rgui_render(void *data,
                 *  set maximum width to ensure icon is
                 *  aligned with left hand edge of values
                 *  column) */
-               entry_value_len = rgui_full_width_layout ? 3 :
-                     (RGUI_ENTRY_VALUE_MAXLEN > rgui->term_layout.value_maxlen) ?
-                           rgui->term_layout.value_maxlen : RGUI_ENTRY_VALUE_MAXLEN;
+               entry_value_len = rgui_full_width_layout
+                     ? 3
+                     : (RGUI_ENTRY_VALUE_MAXLEN > rgui->term_layout.value_maxlen)
+                           ? rgui->term_layout.value_maxlen
+                           : RGUI_ENTRY_VALUE_MAXLEN;
 
                /* Update width of entry title field */
                entry_title_max_len -= entry_value_len + 2;
@@ -5375,22 +5562,25 @@ static void rgui_render(void *data,
          }
          else
          {
-            ticker.s        = entry_title_buf;
-            ticker.len      = entry_title_max_len;
+            ticker.s                  = entry_title_buf;
+            ticker.len                = entry_title_max_len;
             if (!string_is_empty(entry.rich_label))
-               ticker.str   = entry.rich_label;
+               ticker.str             = entry.rich_label;
             else
-               ticker.str   = entry.path;
-            ticker.selected = entry_selected;
+               ticker.str             = entry.path;
+            ticker.selected           = entry_selected;
 
             gfx_animation_ticker(&ticker);
          }
 
          /* Print entry title */
-         blit_line(rgui, fb_width,
-               ticker_x_offset + x + (2 * rgui->font_width_stride), y,
+         rgui_blit_line(rgui,
+               fb_width,
+               ticker_x_offset + x + (2 * rgui->font_width_stride),
+               y,
                entry_title_buf,
-               entry_color, rgui->colors.shadow_color);
+               entry_color,
+               rgui->colors.shadow_color);
 
          /* Print entry value, if required */
          switch (entry_value_type)
@@ -5409,45 +5599,63 @@ static void rgui_render(void *data,
                }
                else
                {
-                  ticker.s        = type_str_buf;
-                  ticker.len      = entry_value_len;
-                  ticker.str      = entry_value;
+                  ticker.s                  = type_str_buf;
+                  ticker.len                = entry_value_len;
+                  ticker.str                = entry_value;
 
                   gfx_animation_ticker(&ticker);
                }
 
-               /* Print entry value */
-               blit_line(rgui,
-                     fb_width,
-                     ticker_x_offset + term_end_x - ((entry_value_len + 1) * rgui->font_width_stride),
-                     y,
-                     type_str_buf,
-                     entry_color, rgui->colors.shadow_color);
+               {
+                  uint16_t entry_value_color = entry_color;
+
+                  if (!entry_selected &&
+                        (     string_is_equal(entry_value, "null")
+                           || string_is_equal(entry_value, "OFF")
+                           || string_is_equal(entry_value, "...")))
+                     entry_value_color = rgui->colors.disabled_color;
+
+                  /* Print entry value */
+                  rgui_blit_line(rgui,
+                        fb_width,
+                        ticker_x_offset + term_end_x - ((entry_value_len + 1) * rgui->font_width_stride),
+                        y,
+                        type_str_buf,
+                        entry_value_color, rgui->colors.shadow_color);
+               }
                break;
             case RGUI_ENTRY_VALUE_SWITCH_ON:
-               rgui_render_toggle_switch(rgui, fb_width,
-                     rgui_full_width_layout ?
-                           (term_end_x - ((RGUI_SYMBOL_WIDTH_STRIDE * 3) + rgui->font_width_stride)) :
-                                 (term_end_x - ((entry_value_len + 1) * rgui->font_width_stride)),
+               rgui_render_toggle_switch(rgui,
+                     fb_width,
+                     rgui_full_width_layout
+                           ? (term_end_x - ((RGUI_SYMBOL_WIDTH_STRIDE * 3) + rgui->font_width_stride))
+                           : (term_end_x - ((entry_value_len + 1) * rgui->font_width_stride)),
                      y,
                      true,
-                     entry_color, rgui->colors.shadow_color);
+                     entry_color,
+                     rgui->colors.shadow_color);
                break;
             case RGUI_ENTRY_VALUE_SWITCH_OFF:
-               rgui_render_toggle_switch(rgui, fb_width,
-                     rgui_full_width_layout ?
-                           (term_end_x - ((RGUI_SYMBOL_WIDTH_STRIDE * 3) + rgui->font_width_stride)) :
-                                 (term_end_x - ((entry_value_len + 1) * rgui->font_width_stride)),
+               rgui_render_toggle_switch(rgui,
+                     fb_width,
+                     rgui_full_width_layout
+                           ? (term_end_x - ((RGUI_SYMBOL_WIDTH_STRIDE * 3) + rgui->font_width_stride))
+                           : (term_end_x - ((entry_value_len + 1) * rgui->font_width_stride)),
                      y,
                      false,
-                     entry_color, rgui->colors.shadow_color);
+                     rgui->colors.disabled_color,
+                     rgui->colors.shadow_color);
                break;
             case RGUI_ENTRY_VALUE_CHECKMARK:
                /* Print marker for currently selected
                 * item in drop-down lists */
-               blit_symbol(rgui, fb_width, x + rgui->font_width_stride, y,
+               rgui_blit_symbol(rgui,
+                     fb_width,
+                     x + rgui->font_width_stride,
+                     y,
                      RGUI_SYMBOL_CHECKMARK,
-                     entry_color, rgui->colors.shadow_color);
+                     entry_color,
+                     rgui->colors.shadow_color);
                break;
             default:
                break;
@@ -5455,7 +5663,7 @@ static void rgui_render(void *data,
 
          /* Print selection marker, if required */
          if (entry_selected)
-            blit_line(rgui, fb_width, x, y, ">",
+            rgui_blit_line(rgui, fb_width, x, y, ">",
                   entry_color, rgui->colors.shadow_color);
       }
 
@@ -5467,7 +5675,8 @@ static void rgui_render(void *data,
             rgui_render_mini_thumbnail(rgui, thumbnail_savestate,
                   rgui->frame_buf.data,
                   GFX_THUMBNAIL_LEFT,
-                  fb_width, fb_height, fb_pitch, menu_rgui_swap_thumbnails);
+                  fb_width, fb_height, fb_pitch,
+                  menu_rgui_swap_thumbnails);
       }
       else if (show_mini_thumbnails)
       {
@@ -5477,12 +5686,14 @@ static void rgui_render(void *data,
             rgui_render_mini_thumbnail(rgui, thumbnail1,
                   rgui->frame_buf.data,
                   GFX_THUMBNAIL_RIGHT,
-                  fb_width, fb_height, fb_pitch, menu_rgui_swap_thumbnails);
+                  fb_width, fb_height, fb_pitch,
+                  menu_rgui_swap_thumbnails);
          if (show_left_thumbnail && thumbnail2)
             rgui_render_mini_thumbnail(rgui, thumbnail2,
                   rgui->frame_buf.data,
                   GFX_THUMBNAIL_LEFT,
-                  fb_width, fb_height, fb_pitch, menu_rgui_swap_thumbnails);
+                  fb_width, fb_height, fb_pitch,
+                  menu_rgui_swap_thumbnails);
       }
 
       /* Print menu sublabel/core name (if required) */
@@ -5504,20 +5715,21 @@ static void rgui_render(void *data,
          }
          else
          {
-            ticker.s        = sublabel_buf;
-            ticker.len      = core_name_len;
-            ticker.str      = rgui->menu_sublabel;
-            ticker.selected = true;
+            ticker.s                  = sublabel_buf;
+            ticker.len                = core_name_len;
+            ticker.str                = rgui->menu_sublabel;
+            ticker.selected           = true;
 
             gfx_animation_ticker(&ticker);
          }
 
-         blit_line(rgui,
+         rgui_blit_line(rgui,
                fb_width,
                ticker_x_offset + rgui->term_layout.start_x + rgui->font_width_stride,
-               (rgui->term_layout.height * rgui->font_height_stride) +
-               rgui->term_layout.start_y + 2, sublabel_buf,
-               rgui->colors.hover_color, rgui->colors.shadow_color);
+               (rgui->term_layout.height * rgui->font_height_stride) + rgui->term_layout.start_y + 2,
+               sublabel_buf,
+               rgui->colors.hover_color,
+               rgui->colors.shadow_color);
       }
       else if (menu_core_enable)
       {
@@ -5540,20 +5752,21 @@ static void rgui_render(void *data,
          }
          else
          {
-            ticker.s        = core_title_buf;
-            ticker.len      = core_name_len;
-            ticker.str      = core_title;
-            ticker.selected = true;
+            ticker.s                  = core_title_buf;
+            ticker.len                = core_name_len;
+            ticker.str                = core_title;
+            ticker.selected           = true;
 
             gfx_animation_ticker(&ticker);
          }
 
-         blit_line(rgui,
+         rgui_blit_line(rgui,
                fb_width,
                ticker_x_offset + rgui->term_layout.start_x + rgui->font_width_stride,
-               (rgui->term_layout.height * rgui->font_height_stride) +
-               rgui->term_layout.start_y + 2, core_title_buf,
-               rgui->colors.hover_color, rgui->colors.shadow_color);
+               (rgui->term_layout.height * rgui->font_height_stride) + rgui->term_layout.start_y + 2,
+               core_title_buf,
+               rgui->colors.hover_color,
+               rgui->colors.shadow_color);
       }
 
       /* Print clock (if required) */
@@ -5571,12 +5784,13 @@ static void rgui_render(void *data,
 
          menu_display_timedate(&datetime);
 
-         blit_line(rgui,
+         rgui_blit_line(rgui,
                fb_width,
                timedate_x,
-               (rgui->term_layout.height * rgui->font_height_stride) +
-               rgui->term_layout.start_y + 2, timedate,
-               rgui->colors.hover_color, rgui->colors.shadow_color);
+               (rgui->term_layout.height * rgui->font_height_stride) + rgui->term_layout.start_y + 2,
+               timedate,
+               rgui->colors.hover_color,
+               rgui->colors.shadow_color);
       }
    }
 
@@ -5584,10 +5798,10 @@ static void rgui_render(void *data,
    {
       rgui_render_messagebox(rgui, rgui->msgbox, fb_width, fb_height);
       rgui->msgbox[0]    = '\0';
-      rgui->force_redraw = true;
+      rgui->flags       |=  RGUI_FLAG_FORCE_REDRAW;
    }
 
-   if (rgui->show_mouse)
+   if (rgui->flags & RGUI_FLAG_SHOW_MOUSE)
    {
       bool cursor_visible   = video_fullscreen 
          && menu_mouse_enable;
@@ -5595,8 +5809,10 @@ static void rgui_render(void *data,
       /* Blit cursor */
       if (cursor_visible && rgui->frame_buf.data)
       {
-         rgui_color_rect(rgui->frame_buf.data, fb_width, fb_height, rgui->pointer.x, rgui->pointer.y - 5, 1, 11, rgui->colors.normal_color);
-         rgui_color_rect(rgui->frame_buf.data, fb_width, fb_height, rgui->pointer.x - 5, rgui->pointer.y, 11, 1, rgui->colors.normal_color);
+         rgui_color_rect(rgui->frame_buf.data, fb_width, fb_height,
+               rgui->pointer.x, rgui->pointer.y - 5, 1, 11, rgui->colors.normal_color);
+         rgui_color_rect(rgui->frame_buf.data, fb_width, fb_height,
+               rgui->pointer.x - 5, rgui->pointer.y, 11, 1, rgui->colors.normal_color);
       }
    }
 }
@@ -5619,20 +5835,21 @@ static void rgui_thumbnail_free(thumbnail_t *thumbnail)
    if (!thumbnail)
       return;
    
-   thumbnail->max_width = 0;
+   thumbnail->max_width  = 0;
    thumbnail->max_height = 0;
-   thumbnail->width = 0;
-   thumbnail->height = 0;
-   thumbnail->is_valid = false;
-   thumbnail->path[0] = '\0';
+   thumbnail->width      = 0;
+   thumbnail->height     = 0;
+   thumbnail->is_valid   = false;
+   thumbnail->path[0]    = '\0';
    
    if (thumbnail->data)
       free(thumbnail->data);
-   thumbnail->data = NULL;
+   thumbnail->data       = NULL;
 }
 
 bool rgui_is_video_config_equal(
-      rgui_video_settings_t *config_a, rgui_video_settings_t *config_b)
+      rgui_video_settings_t *config_a,
+      rgui_video_settings_t *config_b)
 {
    return    (config_a->aspect_ratio_idx == config_b->aspect_ratio_idx)
           && (config_a->viewport.width   == config_b->viewport.width)
@@ -5641,7 +5858,9 @@ bool rgui_is_video_config_equal(
           && (config_a->viewport.y       == config_b->viewport.y);
 }
 
-static void rgui_get_video_config(rgui_video_settings_t *video_settings, unsigned video_aspect_ratio_idx)
+static void rgui_get_video_config(
+      rgui_video_settings_t *video_settings,
+      unsigned video_aspect_ratio_idx)
 {
    /* Could use settings->video_viewport_custom directly,
     * but this seems to be the standard way of doing it... */
@@ -5653,8 +5872,11 @@ static void rgui_get_video_config(rgui_video_settings_t *video_settings, unsigne
    video_settings->viewport.y       = custom_vp->y;
 }
 
-static void rgui_set_video_config(rgui_t *rgui, settings_t *settings,
-      rgui_video_settings_t *video_settings, bool delay_update)
+static void rgui_set_video_config(
+      rgui_t *rgui,
+      settings_t *settings,
+      rgui_video_settings_t *video_settings,
+      bool delay_update)
 {
    /* Could use settings->video_viewport_custom directly,
     * but this seems to be the standard way of doing it... */
@@ -5666,23 +5888,23 @@ static void rgui_set_video_config(rgui_t *rgui, settings_t *settings,
    custom_vp->y                           = video_settings->viewport.y;
    
    aspectratio_lut[ASPECT_RATIO_CUSTOM].value =
-      (float)custom_vp->width / custom_vp->height;
+         (float)custom_vp->width / custom_vp->height;
    
    if (delay_update)
-      rgui->aspect_update_pending = true;
+      rgui->flags |=  RGUI_FLAG_ASPECT_UPDATE_PENDING;
    else
    {
       command_event(CMD_EVENT_VIDEO_SET_ASPECT_RATIO, NULL);
-      rgui->aspect_update_pending = false;
+      rgui->flags &= ~RGUI_FLAG_ASPECT_UPDATE_PENDING;
    }
 }
 
 /* Note: This function is only called when aspect ratio
  * lock is enabled */
-static void rgui_update_menu_viewport(rgui_t *rgui,
-      gfx_display_t    *p_disp,
-      unsigned menu_rgui_aspect_ratio_lock
-)
+static void rgui_update_menu_viewport(
+      rgui_t *rgui,
+      gfx_display_t *p_disp,
+      unsigned menu_rgui_aspect_ratio_lock)
 {
    struct video_viewport vp;
    unsigned fb_width           = p_disp->framebuf_width;
@@ -5709,8 +5931,9 @@ static void rgui_update_menu_viewport(rgui_t *rgui,
        * be determined simply by dividing viewport width by height */
       float delta;
 #ifdef HW_RVL
-      float device_aspect  = (CONF_GetAspectRatio() == CONF_ASPECT_4_3) ?
-            (4.0f / 3.0f) : (16.0f / 9.0f);
+      float device_aspect  = (CONF_GetAspectRatio() == CONF_ASPECT_4_3)
+            ? (4.0f / 3.0f)
+            : (16.0f / 9.0f);
 #else
       float device_aspect  = (4.0f / 3.0f);
 #endif
@@ -5730,20 +5953,19 @@ static void rgui_update_menu_viewport(rgui_t *rgui,
       }
 #else
       /* Check whether we need to perform integer scaling */
-      bool do_integer_scaling = (menu_rgui_aspect_ratio_lock 
-            == RGUI_ASPECT_RATIO_LOCK_INTEGER);
+      bool do_integer_scaling = (menu_rgui_aspect_ratio_lock == RGUI_ASPECT_RATIO_LOCK_INTEGER);
       
       if (do_integer_scaling)
       {
          unsigned width_scale  = (vp.full_width / fb_width);
          unsigned height_scale = (vp.full_height / fb_height);
          unsigned        scale = (width_scale <= height_scale) 
-            ? width_scale 
-            : height_scale;
+               ? width_scale
+               : height_scale;
          
          if (scale > 0)
          {
-            rgui->menu_video_settings.viewport.width = scale * fb_width;
+            rgui->menu_video_settings.viewport.width  = scale * fb_width;
             rgui->menu_video_settings.viewport.height = scale * fb_height;
          }
          else
@@ -5761,10 +5983,8 @@ static void rgui_update_menu_viewport(rgui_t *rgui,
       /* Normal non-integer aspect-ratio-correct scaling */
       else if (!do_integer_scaling)
       {
-         float display_aspect_ratio = (float)vp.full_width 
-            / (float)vp.full_height;
-         float         aspect_ratio = (float)fb_width 
-            / (float)fb_height;
+         float display_aspect_ratio = (float)vp.full_width / (float)vp.full_height;
+         float         aspect_ratio = (float)fb_width / (float)fb_height;
          
          if (aspect_ratio > display_aspect_ratio)
          {
@@ -5780,14 +6000,10 @@ static void rgui_update_menu_viewport(rgui_t *rgui,
 #endif
       
       /* Sanity check */
-      rgui->menu_video_settings.viewport.width = 
-         (rgui->menu_video_settings.viewport.width < 1) 
-         ? 1 
-         : rgui->menu_video_settings.viewport.width;
-      rgui->menu_video_settings.viewport.height = 
-         (rgui->menu_video_settings.viewport.height < 1) 
-         ? 1 
-         : rgui->menu_video_settings.viewport.height;
+      if (rgui->menu_video_settings.viewport.width < 1)
+         rgui->menu_video_settings.viewport.width = 1;
+      if (rgui->menu_video_settings.viewport.height < 1)
+         rgui->menu_video_settings.viewport.height = 1;
    }
    else
    {
@@ -5799,8 +6015,9 @@ static void rgui_update_menu_viewport(rgui_t *rgui,
    rgui->menu_video_settings.viewport.y = (vp.full_height - rgui->menu_video_settings.viewport.height) / 2;
 }
 
-static bool rgui_set_aspect_ratio(rgui_t *rgui,
-      gfx_display_t    *p_disp,
+static bool rgui_set_aspect_ratio(
+      rgui_t *rgui,
+      gfx_display_t *p_disp,
       bool delay_update)
 {
    unsigned base_term_width;
@@ -5856,8 +6073,9 @@ static bool rgui_set_aspect_ratio(rgui_t *rgui,
    rgui->frame_buf.height = 240;
    video_driver_get_viewport_info(&vp);
    if (vp.full_height < rgui->frame_buf.height)
-      rgui->frame_buf.height = (vp.full_height > RGUI_MIN_FB_HEIGHT) ?
-            vp.full_height : RGUI_MIN_FB_HEIGHT;
+      rgui->frame_buf.height = (vp.full_height > RGUI_MIN_FB_HEIGHT)
+            ? vp.full_height
+            : RGUI_MIN_FB_HEIGHT;
 #endif
    
    /* Frame buffer width */
@@ -5977,15 +6195,18 @@ static bool rgui_set_aspect_ratio(rgui_t *rgui,
     * - On platforms other than Wii and dingux, must
     *   be less than window width but greater than
     *   defined minimum width */
-   rgui->frame_buf.width = (rgui->frame_buf.width > max_frame_buf_width) ?
-         max_frame_buf_width : rgui->frame_buf.width;
-   base_term_width = (base_term_width > rgui->frame_buf.width) ?
-         rgui->frame_buf.width : base_term_width;
+   rgui->frame_buf.width = (rgui->frame_buf.width > max_frame_buf_width)
+         ? max_frame_buf_width
+         : rgui->frame_buf.width;
+   base_term_width = (base_term_width > rgui->frame_buf.width)
+         ? rgui->frame_buf.width
+         : base_term_width;
 #if !(defined(GEKKO) || defined(DINGUX))
    if (vp.full_width < rgui->frame_buf.width)
    {
-      rgui->frame_buf.width = (vp.full_width > RGUI_MIN_FB_WIDTH) ?
-            RGUI_ROUND_FB_WIDTH(vp.full_width) : RGUI_MIN_FB_WIDTH;
+      rgui->frame_buf.width = (vp.full_width > RGUI_MIN_FB_WIDTH)
+            ? RGUI_ROUND_FB_WIDTH(vp.full_width)
+            : RGUI_MIN_FB_WIDTH;
       
       /* An annoyance: have to rescale the frame buffer
        * height and terminal width to maintain the correct
@@ -6058,75 +6279,77 @@ static bool rgui_set_aspect_ratio(rgui_t *rgui,
    /* Allocate frame buffer */
    rgui->frame_buf.data = (uint16_t*)calloc(
          rgui->frame_buf.width * rgui->frame_buf.height, sizeof(uint16_t));
-   
+
    if (!rgui->frame_buf.data)
       return false;
-   
+
    /* Configure 'menu display' settings */
    gfx_display_set_width(rgui->frame_buf.width);
    gfx_display_set_height(rgui->frame_buf.height);
    gfx_display_set_framebuffer_pitch(rgui->frame_buf.width * sizeof(uint16_t));
    
    /* Determine terminal layout */
-   rgui->term_layout.start_x  = (3 * 5) + 1;
-   rgui->term_layout.start_y  = (3 * 5) + rgui->font_height_stride;
-   rgui->term_layout.width    = (base_term_width - (2 * rgui->term_layout.start_x)) / rgui->font_width_stride;
-   rgui->term_layout.height   = (rgui->frame_buf.height - (2 * rgui->term_layout.start_y)) / rgui->font_height_stride;
+   rgui->term_layout.start_x      = (3 * 5) + 1;
+   rgui->term_layout.start_y      = (3 * 5) + rgui->font_height_stride;
+   rgui->term_layout.width        = (base_term_width - (2 * rgui->term_layout.start_x)) / rgui->font_width_stride;
+   rgui->term_layout.height       = (rgui->frame_buf.height - (2 * rgui->term_layout.start_y)) / rgui->font_height_stride;
    rgui->term_layout.value_maxlen = (unsigned)((RGUI_ENTRY_VALUE_MAXLEN_FRACTION * (float)rgui->term_layout.width) + 1.0f);
    
    /* > 'Start X/Y' adjustments */
-   rgui->term_layout.start_x  = (rgui->frame_buf.width - (rgui->term_layout.width * rgui->font_width_stride)) / 2;
-   rgui->term_layout.start_y  = (rgui->frame_buf.height - (rgui->term_layout.height * rgui->font_height_stride)) / 2;
+   rgui->term_layout.start_x      = (rgui->frame_buf.width - (rgui->term_layout.width * rgui->font_width_stride)) / 2;
+   rgui->term_layout.start_y      = (rgui->frame_buf.height - (rgui->term_layout.height * rgui->font_height_stride)) / 2;
    
    /* Allocate background buffer */
-   rgui->background_buf.width = rgui->frame_buf.width;
-   rgui->background_buf.height= rgui->frame_buf.height;
-   rgui->background_buf.data  = (uint16_t*)calloc(
+   rgui->background_buf.width     = rgui->frame_buf.width;
+   rgui->background_buf.height    = rgui->frame_buf.height;
+   rgui->background_buf.data      = (uint16_t*)calloc(
          rgui->background_buf.width * rgui->background_buf.height, sizeof(uint16_t));
-   
+
    if (!rgui->background_buf.data)
       return false;
    
    /* Allocate thumbnail buffer */
-   rgui->fs_thumbnail.max_width    = rgui->frame_buf.width;
-   rgui->fs_thumbnail.max_height   = rgui->frame_buf.height - (unsigned)(rgui->font_height_stride * 2.0f) - 1;
-   rgui->fs_thumbnail.data         = (uint16_t*)calloc(
+   rgui->fs_thumbnail.max_width   = rgui->frame_buf.width;
+   rgui->fs_thumbnail.max_height  = rgui->frame_buf.height - (unsigned)(rgui->font_height_stride * 2.0f) - 1;
+   rgui->fs_thumbnail.data        = (uint16_t*)calloc(
          rgui->fs_thumbnail.max_width * rgui->fs_thumbnail.max_height, sizeof(uint16_t));
+
    if (!rgui->fs_thumbnail.data)
       return false;
-   
+
    /* Allocate mini thumbnail buffers */
-   mini_thumbnail_term_width       = (unsigned)((float)rgui->term_layout.width * (2.0f / 5.0f));
-   mini_thumbnail_term_width       = mini_thumbnail_term_width > 19 ? 19 : mini_thumbnail_term_width;
-   rgui->mini_thumbnail_max_width  = mini_thumbnail_term_width * rgui->font_width_stride;
-   rgui->mini_thumbnail_max_height = (unsigned)((rgui->term_layout.height * rgui->font_height_stride) * 0.5f) - 2;
+   mini_thumbnail_term_width            = (unsigned)((float)rgui->term_layout.width * (2.0f / 5.0f));
+   if (mini_thumbnail_term_width > 19)
+      mini_thumbnail_term_width         = 19;
+   rgui->mini_thumbnail_max_width       = mini_thumbnail_term_width * rgui->font_width_stride;
+   rgui->mini_thumbnail_max_height      = (unsigned)((rgui->term_layout.height * rgui->font_height_stride) * 0.5f) - 2;
    
-   rgui->mini_thumbnail.max_width  = rgui->mini_thumbnail_max_width;
-   rgui->mini_thumbnail.max_height = rgui->mini_thumbnail_max_height;
-   rgui->mini_thumbnail.data       = (uint16_t*)calloc(
-         rgui->mini_thumbnail.max_width * rgui->mini_thumbnail.max_height,
-         sizeof(uint16_t));
+   rgui->mini_thumbnail.max_width       = rgui->mini_thumbnail_max_width;
+   rgui->mini_thumbnail.max_height      = rgui->mini_thumbnail_max_height;
+   rgui->mini_thumbnail.data            = (uint16_t*)calloc(
+         rgui->mini_thumbnail.max_width * rgui->mini_thumbnail.max_height, sizeof(uint16_t));
+
    if (!rgui->mini_thumbnail.data)
       return false;
-   
+
    rgui->mini_left_thumbnail.max_width  = rgui->mini_thumbnail_max_width;
    rgui->mini_left_thumbnail.max_height = rgui->mini_thumbnail_max_height;
    rgui->mini_left_thumbnail.data       = (uint16_t*)calloc(
-         rgui->mini_left_thumbnail.max_width * rgui->mini_left_thumbnail.max_height,
-         sizeof(uint16_t));
+         rgui->mini_left_thumbnail.max_width * rgui->mini_left_thumbnail.max_height, sizeof(uint16_t));
+
    if (!rgui->mini_left_thumbnail.data)
       return false;
-   
+
    /* Trigger background/display update */
    rgui->theme_preset_path[0]       = '\0';
    rgui->last_theme_dynamic_path[0] = '\0';
-   rgui->bg_modified                = true;
-   rgui->force_redraw               = true;
+   rgui->flags                     |= RGUI_FLAG_BG_MODIFIED
+                                    | RGUI_FLAG_FORCE_REDRAW;
    
    /* If aspect ratio lock is enabled, notify
     * video driver of change */
-   if ((aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE) &&
-       !rgui->ignore_resize_events)
+   if (   (aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE)
+       && (!(rgui->flags & RGUI_FLAG_IGNORE_RESIZE_EVENTS)))
    {
       rgui_update_menu_viewport(rgui, p_disp, settings->uints.menu_rgui_aspect_ratio_lock);
       rgui_set_video_config(rgui, settings, &rgui->menu_video_settings, delay_update);
@@ -6137,7 +6360,8 @@ static bool rgui_set_aspect_ratio(rgui_t *rgui,
 
 static void rgui_menu_animation_update_time(
       float *ticker_pixel_increment,
-      unsigned video_width, unsigned video_height)
+      unsigned video_width,
+      unsigned video_height)
 {
    /* RGUI framebuffer size is independent of
     * display resolution, so have to use a fixed
@@ -6186,18 +6410,20 @@ static void *rgui_init(void **userdata, bool video_is_threaded)
     * but for extra safety we will only permit display widget
     * additions when the current gfx driver reports that it
     * has widget support */
-   rgui->widgets_supported = gfx_widgets_ready();
-
-   if (rgui->widgets_supported)
+   if (gfx_widgets_ready())
+   {
+      rgui->flags |= RGUI_FLAG_WIDGETS_SUPPORTED;
       gfx_display_init_white_texture();
+   }
 #endif
 
-   rgui->menu_title[0]    = '\0';
-   rgui->menu_sublabel[0] = '\0';
-   rgui->is_playlist      = false;
+   rgui->menu_title[0]              = '\0';
+   rgui->menu_sublabel[0]           = '\0';
+   rgui->flags                     &= ~RGUI_FLAG_IS_PLAYLIST;
 
    /* Set pixel format conversion function */
-   rgui->transparency_supported = rgui_set_pixel_format_function();
+   if (rgui_set_pixel_format_function())
+      rgui->flags                  |=  RGUI_FLAG_TRANSPARENCY_SUPPORTED;
 
    /* Initialise fonts */
    if (!rgui_fonts_init(rgui))
@@ -6208,29 +6434,30 @@ static void *rgui_init(void **userdata, bool video_is_threaded)
 
    /* Get initial 'window' dimensions */
    video_driver_get_viewport_info(&vp);
-   rgui->window_width          = vp.full_width;
-   rgui->window_height         = vp.full_height;
-   rgui->ignore_resize_events  = false;
+   rgui->window_width               = vp.full_width;
+   rgui->window_height              = vp.full_height;
+   rgui->flags                     &= ~RGUI_FLAG_IGNORE_RESIZE_EVENTS;
 
    /* Set aspect ratio
     * - Allocates frame buffer
     * - Configures variable 'menu display' settings */
-   rgui->menu_aspect_ratio_lock = aspect_ratio_lock;
-   rgui->aspect_update_pending  = false;
+   rgui->menu_aspect_ratio_lock     = aspect_ratio_lock;
+   rgui->flags                     &= ~RGUI_FLAG_ASPECT_UPDATE_PENDING;
    if (!rgui_set_aspect_ratio(rgui, p_disp, false))
       goto error;
 
    /* Fixed 'menu display' settings */
-   new_font_height = rgui->font_height_stride * 2;
-   p_disp->header_height = new_font_height;
+   new_font_height                  = rgui->font_height_stride * 2;
+   p_disp->header_height            = new_font_height;
 
    /* Prepare RGUI colors, to improve performance */
    rgui->theme_preset_path[0]       = '\0';
    rgui->theme_dynamic_path[0]      = '\0';
    rgui->last_theme_dynamic_path[0] = '\0';
    if (rgui_color_theme == RGUI_THEME_DYNAMIC)
-      update_dynamic_theme_path(rgui, dynamic_theme_dir);
-   prepare_rgui_colors(rgui,
+      rgui_update_dynamic_theme_path(rgui, dynamic_theme_dir);
+
+   rgui_prepare_colors(rgui,
          settings->uints.menu_rgui_color_theme,
          settings->paths.path_rgui_theme_preset,
          settings->bools.menu_rgui_transparency,
@@ -6240,24 +6467,29 @@ static void *rgui_init(void **userdata, bool video_is_threaded)
    menu_entries_ctl(MENU_ENTRIES_CTL_SET_START, &start);
    rgui->scroll_y              = 0;
 
-   rgui->bg_thickness          = settings->bools.menu_rgui_background_filler_thickness_enable;
-   rgui->border_thickness      = settings->bools.menu_rgui_border_filler_thickness_enable;
-   rgui->border_enable         = settings->bools.menu_rgui_border_filler_enable;
-   rgui->shadow_enable         = settings->bools.menu_rgui_shadows;
+   if (settings->bools.menu_rgui_background_filler_thickness_enable)
+      rgui->flags             |=  RGUI_FLAG_BG_THICKNESS;
+   if (settings->bools.menu_rgui_border_filler_thickness_enable)
+      rgui->flags             |=  RGUI_FLAG_BORDER_THICKNESS;
+   if (settings->bools.menu_rgui_border_filler_enable)
+      rgui->flags             |=  RGUI_FLAG_BORDER_ENABLE;
+   if (settings->bools.menu_rgui_shadows)
+      rgui->flags             |=  RGUI_FLAG_SHADOW_ENABLE;
    rgui->particle_effect       = settings->uints.menu_rgui_particle_effect;
-   rgui->extended_ascii_enable = settings->bools.menu_rgui_extended_ascii;
+   if (settings->bools.menu_rgui_extended_ascii)
+      rgui->flags             |= RGUI_FLAG_EXTENDED_ASCII_ENABLE;
 
    rgui->last_width            = rgui->frame_buf.width;
    rgui->last_height           = rgui->frame_buf.height;
 
-   rgui->show_mouse            = false;
-   rgui->show_screensaver      = false;
+   rgui->flags                &= ~(RGUI_FLAG_SHOW_MOUSE
+                                 | RGUI_FLAG_SHOW_SCREENSAVER);
 
    /* Initialise particle effect, if required */
    if (rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE)
       rgui_init_particle_effect(rgui, p_disp);
 
-   /* Set initial 'blit_line/symbol' functions */
+   /* Set initial 'rgui_blit_line/rgui_blit_symbol' functions */
    rgui_set_blit_functions(
          rgui->language,
          settings->bools.menu_rgui_shadows,
@@ -6270,10 +6502,10 @@ static void *rgui_init(void **userdata, bool video_is_threaded)
    rgui->thumbnail_queue_size        = 0;
    rgui->left_thumbnail_queue_size   = 0;
    rgui->gfx_thumbnails_prev         = -1;
-   rgui->thumbnail_load_pending      = false;
+   rgui->flags                      &= ~RGUI_FLAG_THUMBNAIL_LOAD_PENDING;
    rgui->thumbnail_load_trigger_time = 0;
    /* Ensure that we start with fullscreen thumbnails disabled */
-   rgui->show_fs_thumbnail           = false;
+   rgui->flags                      &= ~RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL;
 
    rgui->savestate_thumbnail_file_path[0]      = '\0';
    rgui->prev_savestate_thumbnail_file_path[0] = '\0';
@@ -6313,7 +6545,7 @@ static void rgui_free(void *data)
       return;
 
 #ifdef HAVE_GFX_WIDGETS
-   if (rgui->widgets_supported)
+   if (rgui->flags & RGUI_FLAG_WIDGETS_SUPPORTED)
       gfx_display_deinit_white_texture();
 #endif
    if (rgui->thumbnail_path_data)
@@ -6343,17 +6575,17 @@ static void rgui_set_texture(void *data)
    rgui_t *rgui                    = (rgui_t*)data;
 
    /* Framebuffer is dirty and needs to be updated? */
-   if (!rgui || !p_disp->framebuf_dirty)
+   if (!rgui || !(p_disp->flags & GFX_DISP_FLAG_FB_DIRTY))
       return;
 
    fb_width               = p_disp->framebuf_width;
    fb_height              = p_disp->framebuf_height;
 
-   p_disp->framebuf_dirty = false;
+   p_disp->flags         &= ~GFX_DISP_FLAG_FB_DIRTY;
 
    if (internal_upscale_level == RGUI_UPSCALE_NONE)
       video_driver_set_texture_frame(rgui->frame_buf.data,
-         false, fb_width, fb_height, 1.0f);
+            false, fb_width, fb_height, 1.0f);
    else
    {
       struct video_viewport vp;
@@ -6365,7 +6597,7 @@ static void rgui_set_texture(void *data)
        * than the menu framebuffer, no scaling is required */
       if ((vp.width <= fb_width) && (vp.height <= fb_height))
          video_driver_set_texture_frame(rgui->frame_buf.data,
-            false, fb_width, fb_height, 1.0f);
+               false, fb_width, fb_height, 1.0f);
       else
       {
          unsigned out_width;
@@ -6389,9 +6621,9 @@ static void rgui_set_texture(void *data)
          }
          
          /* Allocate upscaling buffer, if required */
-         if (  (upscale_buf->width  != out_width)  ||
-               (upscale_buf->height != out_height) ||
-               !upscale_buf->data)
+         if (     (upscale_buf->width  != out_width)
+               || (upscale_buf->height != out_height)
+               || !upscale_buf->data)
          {
             upscale_buf->width  = out_width;
             upscale_buf->height = out_height;
@@ -6473,61 +6705,82 @@ static void rgui_load_current_thumbnails(rgui_t *rgui, bool download_missing)
    const char *thumbnail_path      = NULL;
    const char *left_thumbnail_path = NULL;
    bool thumbnails_missing         = false;
-   
+
    /* Right (or fullscreen) thumbnail */
    if (gfx_thumbnail_get_path(rgui->thumbnail_path_data,
          GFX_THUMBNAIL_RIGHT, &thumbnail_path))
    {
-      rgui->entry_has_thumbnail = rgui_request_thumbnail(
-            rgui->show_fs_thumbnail ? &rgui->fs_thumbnail : &rgui->mini_thumbnail,
+      if (rgui_request_thumbnail(
+            (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+                  ? &rgui->fs_thumbnail
+                  : &rgui->mini_thumbnail,
             GFX_THUMBNAIL_RIGHT,
             &rgui->thumbnail_queue_size,
             thumbnail_path,
-            &thumbnails_missing);
+            &thumbnails_missing))
+         rgui->flags |=  RGUI_FLAG_ENTRY_HAS_THUMBNAIL;
+      else
+         rgui->flags &= ~RGUI_FLAG_ENTRY_HAS_THUMBNAIL;
    }
    
    /* Left thumbnail
     * (Note: there is no need to load this when viewing
     * fullscreen thumbnails) */
-   if (!rgui->show_fs_thumbnail && string_is_empty(rgui->savestate_thumbnail_file_path))
+   if (     !(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+         && string_is_empty(rgui->savestate_thumbnail_file_path))
    {
       if (gfx_thumbnail_get_path(rgui->thumbnail_path_data,
             GFX_THUMBNAIL_LEFT, &left_thumbnail_path))
-         rgui->entry_has_left_thumbnail = rgui_request_thumbnail(
+      {
+         if (rgui_request_thumbnail(
                &rgui->mini_left_thumbnail,
                GFX_THUMBNAIL_LEFT,
                &rgui->left_thumbnail_queue_size,
                left_thumbnail_path,
-               &thumbnails_missing);
+               &thumbnails_missing))
+            rgui->flags |=  RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
+         else
+            rgui->flags &= ~RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
+      }
    }
    else if (!string_is_empty(rgui->savestate_thumbnail_file_path))
    {
       if (gfx_thumbnail_get_path(rgui->thumbnail_path_data,
             GFX_THUMBNAIL_LEFT, &left_thumbnail_path))
-         rgui->entry_has_left_thumbnail = rgui_request_thumbnail(
-               &rgui->mini_left_thumbnail,
-               GFX_THUMBNAIL_LEFT,
-               &rgui->left_thumbnail_queue_size,
-               rgui->savestate_thumbnail_file_path,
-               &thumbnails_missing);
+      {
+         if (rgui_request_thumbnail(
+                  &rgui->mini_left_thumbnail,
+                  GFX_THUMBNAIL_LEFT,
+                  &rgui->left_thumbnail_queue_size,
+                  rgui->savestate_thumbnail_file_path,
+                  &thumbnails_missing))
+            rgui->flags |=  RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
+         else
+            rgui->flags &= ~RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
+      }
    }
 
    /* Reset 'load pending' state */
-   rgui->thumbnail_load_pending = false;
-   
+   rgui->flags                 &= ~RGUI_FLAG_THUMBNAIL_LOAD_PENDING;
    /* Force a redraw (so 'entry_has_thumbnail' values are
     * applied immediately) */
-   rgui->force_redraw           = true;
+   rgui->flags                 |=  RGUI_FLAG_FORCE_REDRAW;
    
 #ifdef HAVE_NETWORKING
    /* On demand thumbnail downloads */
    if (thumbnails_missing && download_missing)
    {
-      const char *system = NULL;
+      const char *system   = NULL;
+      playlist_t *playlist = playlist_get_cached();
+      size_t selection     = menu_navigation_get_selection();
+
+      /* Explore list needs cached selection index */
+      if (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+         selection = gfx_thumbnail_get_playlist_index(rgui->thumbnail_path_data);
 
       if (gfx_thumbnail_get_system(rgui->thumbnail_path_data, &system))
          task_push_pl_entry_thumbnail_download(system,
-               playlist_get_cached(), (unsigned)menu_navigation_get_selection(),
+               playlist, (unsigned)selection,
                false, true);
    }
 #endif
@@ -6553,18 +6806,16 @@ static void rgui_update_savestate_thumbnail_path(void *data, unsigned i)
 
    /* Savestate thumbnails are only relevant
     * when viewing the running quick menu or state slots */
-   if (!((rgui->is_quick_menu && menu_is_running_quick_menu()) || rgui->is_state_slot))
+   if (!(   (rgui->is_quick_menu && menu_is_running_quick_menu())
+         || (rgui->flags & RGUI_FLAG_IS_STATE_SLOT)))
       return;
 
    if (savestate_thumbnail_enable)
    {
       menu_entry_t entry;
 
-      MENU_ENTRY_INIT(entry);
-      entry.path_enabled       = false;
-      entry.rich_label_enabled = false;
-      entry.value_enabled      = false;
-      entry.sublabel_enabled   = false;
+      MENU_ENTRY_INITIALIZE(entry);
+      entry.flags |= MENU_ENTRY_FLAG_LABEL_ENABLED;
       menu_entry_get(&entry, 0, i, NULL, true);
 
       if (!string_is_empty(entry.label))
@@ -6581,7 +6832,7 @@ static void rgui_update_savestate_thumbnail_path(void *data, unsigned i)
             if (string_to_unsigned(entry.label) == MENU_ENUM_LABEL_STATE_SLOT)
             {
                state_slot          = i - 1;
-               rgui->is_state_slot = true;
+               rgui->flags        |= RGUI_FLAG_IS_STATE_SLOT;
             }
 
             if (state_slot < 0)
@@ -6630,7 +6881,8 @@ static void rgui_update_savestate_thumbnail_image(void *data)
 
    /* Savestate thumbnails are only relevant
     * when viewing the running quick menu or state slots */
-   if (!((rgui->is_quick_menu && menu_is_running_quick_menu()) || rgui->is_state_slot))
+   if (!(  ((rgui->is_quick_menu) && menu_is_running_quick_menu())
+         || (rgui->flags & RGUI_FLAG_IS_STATE_SLOT)))
       return;
 
    /* If path is empty, just reset thumbnail */
@@ -6638,13 +6890,16 @@ static void rgui_update_savestate_thumbnail_image(void *data)
       rgui_reset_savestate_thumbnail(rgui);
    else
    {
-      bool thumbnails_missing = false;
-      rgui->entry_has_left_thumbnail = rgui_request_thumbnail(
+      bool thumbnails_missing        = false;
+      if (rgui_request_thumbnail(
             &rgui->mini_left_thumbnail,
             GFX_THUMBNAIL_LEFT,
             &rgui->left_thumbnail_queue_size,
             rgui->savestate_thumbnail_file_path,
-            &thumbnails_missing);
+            &thumbnails_missing))
+         rgui->flags |=  RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
+      else
+         rgui->flags &= ~RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL;
    }
 }
 
@@ -6655,13 +6910,16 @@ static void rgui_scan_selected_entry_thumbnail(rgui_t *rgui, bool force_load)
    bool menu_rgui_inline_thumbnails  = settings->bools.menu_rgui_inline_thumbnails;
    unsigned menu_rgui_thumbnail_delay= settings->uints.menu_rgui_thumbnail_delay;
    bool network_on_demand_thumbnails = settings->bools.network_on_demand_thumbnails;
-   rgui->entry_has_thumbnail         = false;
-   rgui->entry_has_left_thumbnail    = false;
-   rgui->thumbnail_load_pending      = false;
+   rgui->flags                      &= ~(RGUI_FLAG_THUMBNAIL_LOAD_PENDING
+                                       | RGUI_FLAG_ENTRY_HAS_THUMBNAIL
+                                       | RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL
+                                        );
 
    /* Update thumbnail content/path */
-   if ((rgui->show_fs_thumbnail || menu_rgui_inline_thumbnails) 
-         && (rgui->is_playlist || rgui->is_explore_list || rgui->is_quick_menu))
+   if (((rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL) || menu_rgui_inline_thumbnails)
+         && (  (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+            || (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+            || (rgui->is_quick_menu)))
    {
       size_t selection      = menu_navigation_get_selection();
       size_t list_size      = menu_entries_get_size();
@@ -6669,7 +6927,7 @@ static void rgui_scan_selected_entry_thumbnail(rgui_t *rgui, bool force_load)
       bool playlist_valid   = false;
       size_t playlist_index = selection;
 
-      if (rgui->is_playlist)
+      if (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
       {
          /* Get playlist index corresponding
           * to the selected entry */
@@ -6696,41 +6954,20 @@ static void rgui_scan_selected_entry_thumbnail(rgui_t *rgui, bool force_load)
                playlist_valid ? playlist_get_cached() : NULL, playlist_index);
       }
 #if defined(HAVE_LIBRETRODB)
-      else if (rgui->is_explore_list)
+      else if (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
       {
          /* Get playlist index corresponding
           * to the selected entry */
-         if (list &&
-             (selection < list_size))
+         if (list && selection < list_size)
          {
+            /* Selected entry */
             menu_entry_t entry;
-            const char *db_name;
-
-            MENU_ENTRY_INIT(entry);
-            entry.label_enabled      = false;
-            entry.rich_label_enabled = false;
-            entry.value_enabled      = false;
-            entry.sublabel_enabled   = false;
+            MENU_ENTRY_INITIALIZE(entry);
+            entry.flags |= MENU_ENTRY_FLAG_PATH_ENABLED;
             menu_entry_get(&entry, 0, selection, NULL, true);
 
-            if (!entry.type)
-               return;
-
-            db_name = menu_explore_get_entry_database(entry.type);
-
-            if (!string_is_empty(entry.path) && !string_is_empty(db_name))
-            {
-               playlist_t *playlist                        = playlist_get_cached();
-               const struct playlist_entry *playlist_entry = NULL;
-               size_t playlist_index                       =
-                     menu_explore_get_entry_playlist_index(list->list[selection].type, &playlist, &playlist_entry);
-
-               rgui->playlist_index = playlist_index;
-
-               gfx_thumbnail_set_content(rgui->thumbnail_path_data, entry.path, db_name);
-            }
-            else
-               gfx_thumbnail_set_content(rgui->thumbnail_path_data, NULL, NULL);
+            rgui->playlist_index =
+                  menu_explore_set_playlist_thumbnail(entry.type, rgui->thumbnail_path_data);
          }
       }
 #endif
@@ -6743,14 +6980,15 @@ static void rgui_scan_selected_entry_thumbnail(rgui_t *rgui, bool force_load)
    }
 
    /* Save state thumbnails */
-   if (rgui->is_quick_menu || rgui->is_state_slot)
+   if (     (rgui->is_quick_menu)
+         || (rgui->flags & RGUI_FLAG_IS_STATE_SLOT))
    {
       size_t selection = menu_navigation_get_selection();
       size_t list_size = menu_entries_get_size();
 
       if (selection < list_size)
       {
-         rgui_update_savestate_thumbnail_path(rgui, selection);
+         rgui_update_savestate_thumbnail_path(rgui, (unsigned)selection);
          rgui_update_savestate_thumbnail_image(rgui);
       }
    }
@@ -6764,7 +7002,7 @@ static void rgui_scan_selected_entry_thumbnail(rgui_t *rgui, bool force_load)
       else
       {
          /* Schedule a delayed load */
-         rgui->thumbnail_load_pending      = true;
+         rgui->flags                      |=  RGUI_FLAG_THUMBNAIL_LOAD_PENDING;
          rgui->thumbnail_load_trigger_time = menu_driver_get_current_time();
       }
    }
@@ -6774,14 +7012,18 @@ static void rgui_update_thumbnail_image(void *data)
 {
    rgui_t *rgui     = (rgui_t*)data;
 
-   if (rgui->is_playlist || rgui->is_explore_list)
+   if (     (rgui->flags & RGUI_FLAG_IS_PLAYLIST) 
+         || (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST))
       rgui_scan_selected_entry_thumbnail(rgui, true);
 }
 
 static void rgui_toggle_fs_thumbnail(rgui_t *rgui,
       bool menu_rgui_inline_thumbnails)
 {
-   rgui->show_fs_thumbnail     = !rgui->show_fs_thumbnail;
+   if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+      rgui->flags &= ~RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL;
+   else
+      rgui->flags |=  RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL;
 
    /* It is possible that we are waiting for a 'right' thumbnail
     * image to load at this point. If so, and we are displaying
@@ -6793,7 +7035,7 @@ static void rgui_toggle_fs_thumbnail(rgui_t *rgui,
       if (!string_is_empty(rgui->savestate_thumbnail_file_path))
          rgui_reset_savestate_thumbnail(rgui);
 
-      if (rgui->show_fs_thumbnail)
+      if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
       {
          rgui->mini_thumbnail.width    = 0;
          rgui->mini_thumbnail.height   = 0;
@@ -6818,16 +7060,17 @@ static void rgui_toggle_fs_thumbnail(rgui_t *rgui,
 
 static void rgui_refresh_thumbnail_image(void *userdata, unsigned i)
 {
-   rgui_t       *rgui          = (rgui_t*)userdata;
-   settings_t       *settings  = config_get_ptr();
-   bool rgui_inline_thumbnails = settings ? settings->bools.menu_rgui_inline_thumbnails : false;
+   rgui_t                *rgui = (rgui_t*)userdata;
+   settings_t        *settings = config_get_ptr();
+   bool rgui_inline_thumbnails = false;
    if (!rgui || !settings)
       return;
+   rgui_inline_thumbnails      = settings->bools.menu_rgui_inline_thumbnails;
 
    /* Only refresh thumbnails if thumbnails are enabled */
-   if ((rgui->show_fs_thumbnail || rgui_inline_thumbnails) &&
-       (gfx_thumbnail_is_enabled(rgui->thumbnail_path_data, GFX_THUMBNAIL_RIGHT) ||
-        gfx_thumbnail_is_enabled(rgui->thumbnail_path_data, GFX_THUMBNAIL_LEFT)))
+   if (     ((rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL) || rgui_inline_thumbnails)
+         && (gfx_thumbnail_is_enabled(rgui->thumbnail_path_data, GFX_THUMBNAIL_RIGHT) ||
+             gfx_thumbnail_is_enabled(rgui->thumbnail_path_data, GFX_THUMBNAIL_LEFT)))
    {
       /* In all cases, reset current thumbnails */
       rgui->fs_thumbnail.width           = 0;
@@ -6848,7 +7091,9 @@ static void rgui_refresh_thumbnail_image(void *userdata, unsigned i)
       /* Only load thumbnails if currently viewing a
        * playlist (note that thumbnails are loaded
        * immediately, for an optimal user experience) */
-      if (rgui->is_playlist || rgui->is_explore_list || rgui->is_quick_menu)
+      if (     (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+            || (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+            || (rgui->is_quick_menu))
          rgui_scan_selected_entry_thumbnail(rgui, true);
    }
 }
@@ -6857,11 +7102,8 @@ static void rgui_update_menu_sublabel(rgui_t *rgui, size_t selection)
 {
    menu_entry_t entry;
 
-   MENU_ENTRY_INIT(entry);
-   entry.path_enabled       = false;
-   entry.label_enabled      = false;
-   entry.rich_label_enabled = false;
-   entry.value_enabled      = false;
+   MENU_ENTRY_INITIALIZE(entry);
+   entry.flags |= MENU_ENTRY_FLAG_SUBLABEL_ENABLED;
    menu_entry_get(&entry, 0, (unsigned)selection, NULL, true);
 
    if (!string_is_empty(entry.sublabel))
@@ -6886,10 +7128,8 @@ static void rgui_update_menu_sublabel(rgui_t *rgui, size_t selection)
             if (!string_is_empty(line))
             {
                if (!prev_line_empty)
-                  strlcat(rgui->menu_sublabel,
-                        sublabel_spacer, sizeof(rgui->menu_sublabel));
-               strlcat(rgui->menu_sublabel,
-                     line, sizeof(rgui->menu_sublabel));
+                  strlcat(rgui->menu_sublabel, sublabel_spacer, sizeof(rgui->menu_sublabel));
+               strlcat(rgui->menu_sublabel, line, sizeof(rgui->menu_sublabel));
                prev_line_empty = false;
             }
          }
@@ -6949,9 +7189,11 @@ static void rgui_navigation_ascend_alphabet(void *data, size_t *unused)
    rgui_navigation_set(data, true);
 }
 
-static void rgui_populate_entries(void *data,
+static void rgui_populate_entries(
+      void *data,
       const char *path,
-      const char *label, unsigned k)
+      const char *label,
+      unsigned k)
 {
    rgui_t *rgui                  = (rgui_t*)data;
    settings_t *settings          = config_get_ptr();
@@ -6976,11 +7218,11 @@ static void rgui_populate_entries(void *data,
       rgui_fonts_free(rgui);
       rgui_fonts_init(rgui);
 
-      /* Update blit_line functions */
+      /* Update rgui_blit_line functions */
       rgui_set_blit_functions(
             rgui->language,
-            rgui->shadow_enable,
-            rgui->extended_ascii_enable);
+            rgui->flags & RGUI_FLAG_SHADOW_ENABLE,
+            rgui->flags & RGUI_FLAG_EXTENDED_ASCII_ENABLE);
 
       /* Need to recalculate terminal dimensions
        * > easiest method is to call
@@ -6990,25 +7232,38 @@ static void rgui_populate_entries(void *data,
 #endif
    
    /* Check whether we are currently viewing a playlist */
-   rgui->is_playlist =    string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_PLAYLIST_LIST))
-                       || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_LOAD_CONTENT_HISTORY))
-                       || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_FAVORITES_LIST));
+   if (     string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_PLAYLIST_LIST))
+         || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_LOAD_CONTENT_HISTORY))
+         || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_FAVORITES_LIST)))
+      rgui->flags |= RGUI_FLAG_IS_PLAYLIST;
+   else
+      rgui->flags &= ~RGUI_FLAG_IS_PLAYLIST;
 
-   rgui->is_explore_list = string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_EXPLORE_LIST)) ||
-                           string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_EXPLORE_TAB));
+   if (     string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_EXPLORE_LIST))
+         || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_EXPLORE_TAB)))
+      rgui->flags |=  RGUI_FLAG_IS_EXPLORE_LIST;
+   else
+      rgui->flags &= ~RGUI_FLAG_IS_EXPLORE_LIST;
 
    /* Determine whether this is the quick menu */
-   rgui->is_quick_menu = string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_RPL_ENTRY_ACTIONS)) ||
-                         string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_CONTENT_SETTINGS)) ||
-                         string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_SAVESTATE_LIST));
-   rgui->is_state_slot = string_to_unsigned(path) == MENU_ENUM_LABEL_STATE_SLOT;
+   if (     string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_RPL_ENTRY_ACTIONS))
+         || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_CONTENT_SETTINGS))
+         || string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_SAVESTATE_LIST)))
+      rgui->is_quick_menu = true;
+   else
+      rgui->is_quick_menu = false;
+
+   if (string_to_unsigned(path) == MENU_ENUM_LABEL_STATE_SLOT)
+      rgui->flags |=  RGUI_FLAG_IS_STATE_SLOT;
+   else
+      rgui->flags &= ~RGUI_FLAG_IS_STATE_SLOT;
 
    /* Quick Menu under Explore list must also be Quick Menu */
-   if (rgui->is_explore_list)
+   if (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
    {
       rgui->is_quick_menu |= menu_is_nonrunning_quick_menu() || menu_is_running_quick_menu();
       if (rgui->is_quick_menu)
-         rgui->is_explore_list = false;
+         rgui->flags &= ~RGUI_FLAG_IS_EXPLORE_LIST;
    }
    
    /* Set menu title */
@@ -7016,10 +7271,10 @@ static void rgui_populate_entries(void *data,
    
    /* If dynamic themes are enabled, update the theme path */
    if (rgui->color_theme == RGUI_THEME_DYNAMIC)
-      update_dynamic_theme_path(rgui, dynamic_theme_dir);
+      rgui_update_dynamic_theme_path(rgui, dynamic_theme_dir);
    
    /* Cancel any pending thumbnail load operations */
-   rgui->thumbnail_load_pending = false;
+   rgui->flags &= ~RGUI_FLAG_THUMBNAIL_LOAD_PENDING;
    
    rgui_navigation_set(data, true);
    
@@ -7043,28 +7298,29 @@ static void rgui_populate_entries(void *data,
           * the video settings menu are preserved */
          rgui_video_settings_t current_video_settings = {{0}};
          rgui_get_video_config(&current_video_settings, settings->uints.video_aspect_ratio_idx);
-         if (rgui_is_video_config_equal(&current_video_settings,
-                  &rgui->menu_video_settings))
+         if (rgui_is_video_config_equal(&current_video_settings, &rgui->menu_video_settings))
          {
             rgui_set_video_config(rgui, settings, &rgui->content_video_settings, false);
             /* Menu viewport has been overridden - must ignore
              * resize events until the menu is next toggled off */
-            rgui->ignore_resize_events = true;
+            rgui->flags             |=  RGUI_FLAG_IGNORE_RESIZE_EVENTS;
 #if !defined(GEKKO)
             /* Changing the video config may alter the list
              * of entries that should be displayed in the
              * video scaling menu. The current menu layout
              * was generated using the previous video config;
              * we therefore have to force a menu refresh */
-            rgui->force_menu_refresh = true;
+            rgui->flags             |=  RGUI_FLAG_FORCE_MENU_REFRESH;
 #endif
          }
       }
    }
 }
 
-static int rgui_environ(enum menu_environ_cb type,
-      void *data, void *userdata)
+static int rgui_environ(
+      enum menu_environ_cb type,
+      void *data,
+      void *userdata)
 {
    rgui_t           *rgui = (rgui_t*)userdata;
    gfx_display_t *p_disp  = disp_get_ptr();
@@ -7075,20 +7331,20 @@ static int rgui_environ(enum menu_environ_cb type,
    switch (type)
    {
       case MENU_ENVIRON_ENABLE_MOUSE_CURSOR:
-         rgui->show_mouse          = true;
-         p_disp->framebuf_dirty    = true;
+         rgui->flags              |=  RGUI_FLAG_SHOW_MOUSE;
+         p_disp->flags            |=  GFX_DISP_FLAG_FB_DIRTY;
          break;
       case MENU_ENVIRON_DISABLE_MOUSE_CURSOR:
-         rgui->show_mouse          = false;
-         p_disp->framebuf_dirty    = false;
+         rgui->flags              &= ~RGUI_FLAG_SHOW_MOUSE;
+         p_disp->flags            &= ~GFX_DISP_FLAG_FB_DIRTY;
          break;
       case MENU_ENVIRON_ENABLE_SCREENSAVER:
-         rgui->show_screensaver    = true;
-         rgui->force_redraw        = true;
+         rgui->flags              |=  RGUI_FLAG_FORCE_REDRAW
+                                   |  RGUI_FLAG_SHOW_SCREENSAVER;
          break;
       case MENU_ENVIRON_DISABLE_SCREENSAVER:
-         rgui->show_screensaver    = false;
-         rgui->force_redraw        = true;
+         rgui->flags              &= ~RGUI_FLAG_SHOW_SCREENSAVER;
+         rgui->flags              |=  RGUI_FLAG_FORCE_REDRAW;
          break;
       default:
          return -1;
@@ -7099,14 +7355,20 @@ static int rgui_environ(enum menu_environ_cb type,
 
 /* Forward declaration */
 static int rgui_menu_entry_action(
-      void *userdata, menu_entry_t *entry,
-      size_t i, enum menu_action action);
+      void *userdata,
+      menu_entry_t *entry,
+      size_t i,
+      enum menu_action action);
 
-static int rgui_pointer_up(void *data,
-      unsigned x, unsigned y, unsigned ptr,
+static int rgui_pointer_up(
+      void *data,
+      unsigned x,
+      unsigned y,
+      unsigned ptr,
       enum menu_input_pointer_gesture gesture,
       menu_file_list_cbs_t *cbs,
-      menu_entry_t *entry, unsigned action)
+      menu_entry_t *entry,
+      unsigned action)
 {
    rgui_t *rgui           = (rgui_t*)data;
    size_t selection       = menu_navigation_get_selection();
@@ -7114,16 +7376,15 @@ static int rgui_pointer_up(void *data,
    if (!rgui)
       return -1;
 
-
    switch (gesture)
    {
       case MENU_INPUT_GESTURE_TAP:
       case MENU_INPUT_GESTURE_SHORT_PRESS:
          {
             bool show_fs_thumbnail =
-               rgui->show_fs_thumbnail &&
-               rgui->entry_has_thumbnail &&
-               (rgui->fs_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
+                     (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+                  && (rgui->flags & RGUI_FLAG_ENTRY_HAS_THUMBNAIL)
+                  && (rgui->fs_thumbnail.is_valid || (rgui->thumbnail_queue_size > 0));
             gfx_display_t *p_disp  = disp_get_ptr();
             unsigned header_height = p_disp->header_height;
 
@@ -7189,37 +7450,49 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
    unsigned video_height               = video_info->height;
    gfx_display_t *p_disp               = disp_get_ptr();
 
-   if (bg_filler_thickness_enable != rgui->bg_thickness)
+   if (bg_filler_thickness_enable != ((rgui->flags & RGUI_FLAG_BG_THICKNESS) > 0))
    {
-      rgui->bg_thickness     = bg_filler_thickness_enable;
-      rgui->bg_modified      = true;
-      rgui->force_redraw     = true;
+      rgui->flags           |=  RGUI_FLAG_BG_MODIFIED
+                             |  RGUI_FLAG_FORCE_REDRAW;
+      if (bg_filler_thickness_enable)
+         rgui->flags        |=  RGUI_FLAG_BG_THICKNESS;
+      else
+         rgui->flags        &= ~RGUI_FLAG_BG_THICKNESS;
    }
 
-   if (border_filler_thickness_enable != rgui->border_thickness)
+   if (border_filler_thickness_enable != ((rgui->flags & RGUI_FLAG_BORDER_THICKNESS) > 0))
    {
-      rgui->border_thickness = border_filler_thickness_enable;
-      rgui->bg_modified      = true;
-      rgui->force_redraw     = true;
+      rgui->flags           |=  RGUI_FLAG_BG_MODIFIED
+                             |  RGUI_FLAG_FORCE_REDRAW;
+      if (border_filler_thickness_enable)
+         rgui->flags        |=  RGUI_FLAG_BORDER_THICKNESS;
+      else
+         rgui->flags        &= ~RGUI_FLAG_BORDER_THICKNESS;
    }
 
-   if (border_filler_enable != rgui->border_enable)
+   if (border_filler_enable != ((rgui->flags & RGUI_FLAG_BORDER_ENABLE) > 0))
    {
-      rgui->border_enable    = border_filler_enable;
-      rgui->bg_modified      = true;
-      rgui->force_redraw     = true;
+      rgui->flags           |=  RGUI_FLAG_BG_MODIFIED
+                             |  RGUI_FLAG_FORCE_REDRAW;
+      if (border_filler_enable)
+         rgui->flags        |=  RGUI_FLAG_BORDER_ENABLE;
+      else
+         rgui->flags        &= ~RGUI_FLAG_BORDER_ENABLE;
    }
 
-   if (settings->bools.menu_rgui_shadows != rgui->shadow_enable)
+   if (settings->bools.menu_rgui_shadows != ((rgui->flags & RGUI_FLAG_SHADOW_ENABLE) > 0))
    {
       rgui_set_blit_functions(
             rgui->language,
             settings->bools.menu_rgui_shadows,
             settings->bools.menu_rgui_extended_ascii);
 
-      rgui->shadow_enable    = settings->bools.menu_rgui_shadows;
-      rgui->bg_modified      = true;
-      rgui->force_redraw     = true;
+      rgui->flags           |=  RGUI_FLAG_BG_MODIFIED
+                             |  RGUI_FLAG_FORCE_REDRAW;
+      if (settings->bools.menu_rgui_shadows)
+         rgui->flags        |=  RGUI_FLAG_SHADOW_ENABLE;
+      else
+         rgui->flags        &= ~RGUI_FLAG_SHADOW_ENABLE;
    }
 
    if (settings->uints.menu_rgui_particle_effect != rgui->particle_effect)
@@ -7229,33 +7502,38 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
       if (rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE)
          rgui_init_particle_effect(rgui, p_disp);
 
-      rgui->force_redraw     = true;
+      rgui->flags           |= RGUI_FLAG_FORCE_REDRAW;
    }
 
-   if ((rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE) &&
-       (!rgui->show_screensaver || settings->bools.menu_rgui_particle_effect_screensaver))
-      rgui->force_redraw     = true;
+   if (    (rgui->particle_effect != RGUI_PARTICLE_EFFECT_NONE)
+        && (     (!(rgui->flags & RGUI_FLAG_SHOW_SCREENSAVER))
+              || (settings->bools.menu_rgui_particle_effect_screensaver)))
+      rgui->flags           |= RGUI_FLAG_FORCE_REDRAW;
 
-   if (settings->bools.menu_rgui_extended_ascii != rgui->extended_ascii_enable)
+   if (settings->bools.menu_rgui_extended_ascii != ((rgui->flags & RGUI_FLAG_EXTENDED_ASCII_ENABLE) > 0))
    {
       rgui_set_blit_functions(
             rgui->language,
             settings->bools.menu_rgui_shadows,
             settings->bools.menu_rgui_extended_ascii);
 
-      rgui->extended_ascii_enable = settings->bools.menu_rgui_extended_ascii;
-      rgui->force_redraw          = true;
+      rgui->flags                |=  RGUI_FLAG_FORCE_REDRAW;
+      if (settings->bools.menu_rgui_extended_ascii)
+         rgui->flags             |=  RGUI_FLAG_EXTENDED_ASCII_ENABLE;
+      else
+         rgui->flags             &= ~RGUI_FLAG_EXTENDED_ASCII_ENABLE;
    }
 
-   if ((settings->uints.menu_rgui_color_theme != rgui->color_theme) ||
-       (rgui->transparency_supported &&
-            (settings->bools.menu_rgui_transparency != rgui->transparency_enable)))
+   if (     (settings->uints.menu_rgui_color_theme != rgui->color_theme)
+         || (  (rgui->flags & RGUI_FLAG_TRANSPARENCY_SUPPORTED)
+            && (settings->bools.menu_rgui_transparency !=
+               ((rgui->flags & RGUI_FLAG_TRANSPARENCY_ENABLE) > 0))))
    {
       if (settings->uints.menu_rgui_color_theme == RGUI_THEME_DYNAMIC)
-         update_dynamic_theme_path(rgui,
+         rgui_update_dynamic_theme_path(rgui,
                settings->paths.directory_dynamic_wallpapers);
 
-      prepare_rgui_colors(rgui,
+      rgui_prepare_colors(rgui,
             settings->uints.menu_rgui_color_theme,
             settings->paths.path_rgui_theme_preset,
             settings->bools.menu_rgui_transparency,
@@ -7266,7 +7544,7 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
    {
       if (!string_is_equal(settings->paths.path_rgui_theme_preset,
             rgui->theme_preset_path))
-         prepare_rgui_colors(rgui,
+         rgui_prepare_colors(rgui,
                settings->uints.menu_rgui_color_theme,
                settings->paths.path_rgui_theme_preset,
                settings->bools.menu_rgui_transparency,
@@ -7277,7 +7555,7 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
    {
       if (!string_is_equal(rgui->last_theme_dynamic_path,
             rgui->theme_dynamic_path))
-         prepare_rgui_colors(rgui,
+         rgui_prepare_colors(rgui,
                settings->uints.menu_rgui_color_theme,
                settings->paths.path_rgui_theme_preset,
                settings->bools.menu_rgui_transparency,
@@ -7301,14 +7579,14 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
        * - we can no longer guarantee that changes to aspect ratio
        * and custom viewport settings will be preserved. So it
        * no longer makes sense to ignore resize events */
-      rgui->ignore_resize_events = false;
+      rgui->flags               &= ~RGUI_FLAG_IGNORE_RESIZE_EVENTS;
 
       rgui_set_aspect_ratio(rgui, p_disp, true);
    }
 
    /* > Check for changes in aspect ratio lock setting */
-   if ((aspect_ratio_lock != rgui->menu_aspect_ratio_lock) ||
-       rgui->restore_aspect_lock)
+   if (   (aspect_ratio_lock != rgui->menu_aspect_ratio_lock)
+       || (rgui->flags & RGUI_FLAG_RESTORE_ASPECT_LOCK))
    {
       rgui->menu_aspect_ratio_lock = aspect_ratio_lock;
 
@@ -7319,19 +7597,18 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
          /* As with changes in aspect ratio, if we reach this point
           * after visiting the video scaling settings menu, resize
           * events should be monitored again */
-         rgui->ignore_resize_events = false;
-
+         rgui->flags               &= ~RGUI_FLAG_IGNORE_RESIZE_EVENTS;
          rgui_update_menu_viewport(rgui, p_disp, settings->uints.menu_rgui_aspect_ratio_lock);
          rgui_set_video_config(rgui, settings, &rgui->menu_video_settings, true);
       }
 
       /* Clear any pending 'restore aspect lock' flags */
-      rgui->restore_aspect_lock = false;
+      rgui->flags &= ~RGUI_FLAG_RESTORE_ASPECT_LOCK;
    }
 
    /* > Check for changes in window (display) dimensions */
-   if ((rgui->window_width  != video_width) ||
-       (rgui->window_height != video_height))
+   if (     (rgui->window_width  != video_width)
+         || (rgui->window_height != video_height))
    {
 #if !defined(GEKKO) && !defined(DINGUX)
       /* If window width or height are less than the
@@ -7369,16 +7646,16 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
             break;
       }
 
-      if ((video_width < default_fb_width) ||
-          (rgui->window_width < default_fb_width) ||
-          (video_height < 240) ||
-          (rgui->window_height < 240))
+      if (     (video_width < default_fb_width)
+            || (rgui->window_width < default_fb_width)
+            || (video_height < 240)
+            || (rgui->window_height < 240))
          rgui_set_aspect_ratio(rgui, p_disp, true);
 #endif
 
       /* If aspect ratio is locked, have to update viewport */
-      if ((aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE) &&
-          !rgui->ignore_resize_events)
+      if (     (aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE)
+            && (!(rgui->flags & RGUI_FLAG_IGNORE_RESIZE_EVENTS)))
       {
          rgui_update_menu_viewport(rgui, p_disp, settings->uints.menu_rgui_aspect_ratio_lock);
          rgui_set_video_config(rgui, settings, &rgui->menu_video_settings, true);
@@ -7389,27 +7666,29 @@ static void rgui_frame(void *data, video_frame_info_t *video_info)
    }
 
    /* Handle pending thumbnail load operations */
-   if (rgui->thumbnail_load_pending)
+   if (rgui->flags & RGUI_FLAG_THUMBNAIL_LOAD_PENDING)
    {
       /* Check whether current 'load delay' duration has elapsed
        * Note: Delay is increased when viewing fullscreen thumbnails,
        * since the flicker when switching between playlist view and
        * fullscreen thumbnail view is incredibly jarring...) */
       if ((menu_driver_get_current_time() - rgui->thumbnail_load_trigger_time) >=
-          (settings->uints.menu_rgui_thumbnail_delay * 1000 * (rgui->show_fs_thumbnail ? 1.5f : 1.0f)))
+            (settings->uints.menu_rgui_thumbnail_delay * 1000 * ((rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL) 
+                  ? 1.5f
+                  : 1.0f)))
          rgui_load_current_thumbnails(rgui,
                settings->bools.network_on_demand_thumbnails);
    }
 
    /* Read pointer input */
-   if (  settings->bools.menu_mouse_enable ||
-         settings->bools.menu_pointer_enable)
+   if (     settings->bools.menu_mouse_enable
+         || settings->bools.menu_pointer_enable)
    {
       menu_input_get_pointer_state(&rgui->pointer);
 
       /* Screen must be redrawn whenever pointer is active */
       if ((rgui->pointer.type != MENU_POINTER_DISABLED) && rgui->pointer.active)
-         rgui->force_redraw = true;
+         rgui->flags    |= RGUI_FLAG_FORCE_REDRAW;
    }
    else
       rgui->pointer.type = MENU_POINTER_DISABLED;
@@ -7473,7 +7752,7 @@ static void rgui_toggle(void *userdata, bool menu_on)
          /* Any modified video scaling settings have now been
           * registered, so it is again 'safe' to respond to window
           * resize events */
-         rgui->ignore_resize_events = false;
+         rgui->flags &= ~RGUI_FLAG_IGNORE_RESIZE_EVENTS;
       }
 
       /* Upscaling buffer is only required while menu is on. Save
@@ -7495,7 +7774,7 @@ static void rgui_context_reset(void *data, bool is_threaded)
       return;
 
 #ifdef HAVE_GFX_WIDGETS
-   if (rgui->widgets_supported)
+   if (rgui->flags & RGUI_FLAG_WIDGETS_SUPPORTED)
    {
       gfx_display_deinit_white_texture();
       gfx_display_init_white_texture();
@@ -7512,7 +7791,7 @@ static void rgui_context_destroy(void *data)
       return;
 
 #ifdef HAVE_GFX_WIDGETS
-   if (rgui->widgets_supported)
+   if (rgui->flags & RGUI_FLAG_WIDGETS_SUPPORTED)
       gfx_display_deinit_white_texture();
 #endif
 }
@@ -7549,12 +7828,12 @@ static enum menu_action rgui_parse_menu_entry_action(
           * content video settings when saving configuration
           * files/overrides - otherwise RGUI's custom viewport
           * parameters will be included in the generated output */
-         if ((rgui->menu_aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE) &&
-             ((entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_CORE) ||
-              (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR) ||
-              (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_GAME) ||
-              (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG) ||
-              (entry->enum_idx == MENU_ENUM_LABEL_SAVE_NEW_CONFIG)))
+         if (     (rgui->menu_aspect_ratio_lock != RGUI_ASPECT_RATIO_LOCK_NONE)
+               && (  (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_CORE)
+                  || (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR)
+                  || (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_GAME)
+                  || (entry->enum_idx == MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG)
+                  || (entry->enum_idx == MENU_ENUM_LABEL_SAVE_NEW_CONFIG)))
          {
             settings_t *settings                         = config_get_ptr();
             rgui_video_settings_t current_video_settings = {{0}};
@@ -7572,46 +7851,66 @@ static enum menu_action rgui_parse_menu_entry_action(
                rgui_set_video_config(rgui, settings, &rgui->content_video_settings, false);
                /* Schedule a restoration of the aspect ratio
                 * lock on the next frame */
-               rgui->restore_aspect_lock = true;
+               rgui->flags |= RGUI_FLAG_RESTORE_ASPECT_LOCK;
             }
          }
 
-         if (rgui->show_fs_thumbnail)
+         if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
          {
             rgui_thumbnail_cycle_dupe(rgui);
             rgui_toggle_fs_thumbnail(rgui, config_get_ptr()->bools.menu_rgui_inline_thumbnails);
 
-            if (!rgui->is_state_slot && !rgui->is_playlist && !rgui->is_explore_list)
+            if (     (!(rgui->flags & RGUI_FLAG_IS_STATE_SLOT))
+                  && (!(rgui->flags & RGUI_FLAG_IS_PLAYLIST))
+                  && (!(rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)))
                new_action = MENU_ACTION_NOOP;
          }
          break;
       case MENU_ACTION_CANCEL:
-         if (rgui->show_fs_thumbnail)
+         if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
          {
             rgui_thumbnail_cycle_dupe(rgui);
             rgui_toggle_fs_thumbnail(rgui, config_get_ptr()->bools.menu_rgui_inline_thumbnails);
             new_action = MENU_ACTION_NOOP;
          }
+
+         if (string_is_equal(rgui->menu_title, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_MAIN_MENU)))
+         {
+            /* Jump to first item on Main Menu */
+            menu_navigation_set_selection(0);
+            new_action = MENU_ACTION_NOOP;
+         }
          break;
       case MENU_ACTION_START:
          /* Playlist thumbnail fullscreen toggle */
-         if (rgui->is_playlist || rgui->is_explore_list || (rgui->is_quick_menu && !menu_is_running_quick_menu()))
+         if (     (rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+               || (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+               || (rgui->is_quick_menu && !menu_is_running_quick_menu()))
          {
             settings_t *settings = config_get_ptr();
 
-            if (!rgui->show_fs_thumbnail && rgui->gfx_thumbnails_prev < 0)
+            new_action = MENU_ACTION_NOOP;
+
+            if (     (!(rgui->flags & RGUI_FLAG_ENTRY_HAS_THUMBNAIL))
+                  && (!(rgui->flags & RGUI_FLAG_ENTRY_HAS_LEFT_THUMBNAIL)))
+               break;
+
+            if (     (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
+                  && rgui->gfx_thumbnails_prev < 0)
                rgui->gfx_thumbnails_prev = settings->uints.gfx_thumbnails;
 
             /* Show fullscreen image from the left slot if main slot is empty */
-            if (!rgui->mini_thumbnail.is_valid && rgui->mini_left_thumbnail.is_valid)
+            if (     !rgui->mini_thumbnail.is_valid
+                  &&  rgui->mini_left_thumbnail.is_valid)
             {
-               if (rgui->show_fs_thumbnail && rgui->gfx_thumbnails_prev > 0)
+               if (    (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+                     && rgui->gfx_thumbnails_prev > 0)
                {
                   configuration_set_uint(settings,
                         settings->uints.gfx_thumbnails,
                         rgui->gfx_thumbnails_prev);
                }
-               else if (!rgui->show_fs_thumbnail)
+               else if ((!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)))
                {
                   configuration_set_uint(settings,
                         settings->uints.gfx_thumbnails,
@@ -7620,26 +7919,27 @@ static enum menu_action rgui_parse_menu_entry_action(
             }
 
             /* Avoid showing the same thumbnail after returning from fullscreen mode after cycling images */
-            if (rgui->show_fs_thumbnail)
+            if (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
                rgui_thumbnail_cycle_dupe(rgui);
 
             rgui_toggle_fs_thumbnail(rgui, config_get_ptr()->bools.menu_rgui_inline_thumbnails);
-            new_action = MENU_ACTION_NOOP;
 
-            if (!rgui->show_fs_thumbnail)
+            if (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
                rgui->gfx_thumbnails_prev = -1;
          }
          break;
       case MENU_ACTION_SCAN:
          /* Save state slot fullscreen toggle */
-         if ((rgui->is_state_slot || rgui->is_quick_menu) &&
-               !string_is_empty(rgui->savestate_thumbnail_file_path))
+         if (     ((rgui->flags & RGUI_FLAG_IS_STATE_SLOT) || (rgui->is_quick_menu))
+               && !string_is_empty(rgui->savestate_thumbnail_file_path))
          {
             rgui_toggle_fs_thumbnail(rgui, true);
             new_action = MENU_ACTION_NOOP;
          }
          /* Playlist thumbnail cycle */
-         else if (rgui->is_playlist || rgui->is_explore_list || rgui->is_quick_menu)
+         else if ((rgui->flags & RGUI_FLAG_IS_PLAYLIST)
+               || (rgui->flags & RGUI_FLAG_IS_EXPLORE_LIST)
+               || (rgui->is_quick_menu))
          {
             settings_t *settings = config_get_ptr();
 
@@ -7649,8 +7949,8 @@ static enum menu_action rgui_parse_menu_entry_action(
                      settings->uints.menu_left_thumbnails,
                      settings->uints.menu_left_thumbnails + 1);
 
-               if (!rgui->show_fs_thumbnail &&
-                     settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails)
+               if (     (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
+                     && (settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails))
                   configuration_set_uint(settings,
                         settings->uints.menu_left_thumbnails,
                         settings->uints.menu_left_thumbnails + 1);
@@ -7659,8 +7959,8 @@ static enum menu_action rgui_parse_menu_entry_action(
                   configuration_set_uint(settings,
                         settings->uints.menu_left_thumbnails, 1);
 
-               if (!rgui->show_fs_thumbnail &&
-                     settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails)
+               if (     (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
+                     && (settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails))
                   configuration_set_uint(settings,
                         settings->uints.menu_left_thumbnails,
                         settings->uints.menu_left_thumbnails + 1);
@@ -7671,8 +7971,8 @@ static enum menu_action rgui_parse_menu_entry_action(
                      settings->uints.gfx_thumbnails,
                      settings->uints.gfx_thumbnails + 1);
 
-               if (!rgui->show_fs_thumbnail &&
-                     settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails)
+               if (     (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
+                     && (settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails))
                   configuration_set_uint(settings,
                         settings->uints.gfx_thumbnails,
                         settings->uints.gfx_thumbnails + 1);
@@ -7681,8 +7981,8 @@ static enum menu_action rgui_parse_menu_entry_action(
                   configuration_set_uint(settings,
                         settings->uints.gfx_thumbnails, 1);
 
-               if (!rgui->show_fs_thumbnail &&
-                     settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails)
+               if (     (!(rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL))
+                     && (settings->uints.gfx_thumbnails == settings->uints.menu_left_thumbnails))
                   configuration_set_uint(settings,
                         settings->uints.gfx_thumbnails,
                         settings->uints.gfx_thumbnails + 1);
@@ -7695,12 +7995,14 @@ static enum menu_action rgui_parse_menu_entry_action(
       case MENU_ACTION_DOWN:
       case MENU_ACTION_SCROLL_UP:
       case MENU_ACTION_SCROLL_DOWN:
-         if (rgui->show_fs_thumbnail && rgui->is_quick_menu)
+         if (     (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+               && (rgui->is_quick_menu))
             new_action = MENU_ACTION_NOOP;
          break;
       case MENU_ACTION_LEFT:
       case MENU_ACTION_RIGHT:
-         if (rgui->show_fs_thumbnail && (rgui->is_quick_menu && !menu_is_running_quick_menu()))
+         if (     (rgui->flags & RGUI_FLAG_SHOW_FULLSCREEN_THUMBNAIL)
+               && ((rgui->is_quick_menu) && !menu_is_running_quick_menu()))
             new_action = MENU_ACTION_NOOP;
          break;
       default:
@@ -7714,14 +8016,15 @@ static enum menu_action rgui_parse_menu_entry_action(
 
 /* Menu entry action callback */
 static int rgui_menu_entry_action(
-      void *userdata, menu_entry_t *entry,
-      size_t i, enum menu_action action)
+      void *userdata,
+      menu_entry_t *entry,
+      size_t i,
+      enum menu_action action)
 {
    rgui_t *rgui = (rgui_t*)userdata;
 
    /* Process input action */
-   enum menu_action new_action = rgui_parse_menu_entry_action(rgui,
-         entry, action);
+   enum menu_action new_action = rgui_parse_menu_entry_action(rgui, entry, action);
 
    /* Call standard generic_menu_entry_action() function */
    return generic_menu_entry_action(userdata, entry, i, new_action);

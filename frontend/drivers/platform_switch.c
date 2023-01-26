@@ -49,11 +49,11 @@
 #include <string/stdstring.h>
 
 #include "../frontend_driver.h"
-#include "../../verbosity.h"
 #include "../../defaults.h"
+#include "../../file_path_special.h"
 #include "../../paths.h"
 #include "../../retroarch.h"
-#include "../../file_path_special.h"
+#include "../../verbosity.h"
 
 #ifndef IS_SALAMANDER
 #ifdef HAVE_MENU
@@ -231,9 +231,6 @@ static void frontend_switch_get_env(
 
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_RECORD_OUTPUT], g_defaults.dirs[DEFAULT_DIR_PORT],
                       "records", sizeof(g_defaults.dirs[DEFAULT_DIR_RECORD_OUTPUT]));
-
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], g_defaults.dirs[DEFAULT_DIR_PORT],
-                      "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
 
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], g_defaults.dirs[DEFAULT_DIR_PORT],
                       "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));

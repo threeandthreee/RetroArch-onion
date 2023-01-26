@@ -16,11 +16,9 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <libretro.h>
-
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <ctype.h>
 #include <boolean.h>
 
@@ -30,7 +28,6 @@
 #include <retro_miscellaneous.h>
 
 #include "../../file_path_special.h"
-#include "../../verbosity.h"
 
 #include "bitmapfont_10x10.h"
 
@@ -120,10 +117,7 @@ bitmapfont_lut_t *bitmapfont_10x10_load(unsigned language)
    }
 
    if (string_is_empty(font_file))
-   {
-      RARCH_WARN("[bitmap 10x10] No font file found for specified language: %u\n", language);
       goto error;
-   }
 
    /* Get font path */
    fill_pathname_application_special(font_dir, sizeof(font_dir),
@@ -133,25 +127,18 @@ bitmapfont_lut_t *bitmapfont_10x10_load(unsigned language)
 
    /* Attempt to read bitmap file */
    if (!rzipstream_read_file(font_path, &bitmap_raw, &len))
-   {
-      RARCH_WARN("[bitmap 10x10] Failed to read font file: %s\n", font_path);
       goto error;
-   }
 
    /* Ensure that we have the correct number
     * of bytes */
    if (len != font_size)
-   {
-      RARCH_WARN("[bitmap 10x10] Font file has invalid size: %s\n", font_path);
       goto error;
-   }
 
    bitmap_char = (unsigned char *)bitmap_raw;
    num_glyphs  = (glyph_max - glyph_min) + 1;
 
    /* Initialise font struct */
-   font = (bitmapfont_lut_t*)calloc(1, sizeof(bitmapfont_lut_t));
-   if (!font)
+   if (!(font = (bitmapfont_lut_t*)calloc(1, sizeof(bitmapfont_lut_t))))
       goto error;
 
    font->glyph_min = glyph_min;
@@ -160,8 +147,7 @@ bitmapfont_lut_t *bitmapfont_10x10_load(unsigned language)
    /* Note: Need to use a calloc() here, otherwise
     * we'll get undefined behaviour when calling
     * bitmapfont_free_lut() if the following loop fails */
-   font->lut = (bool**)calloc(1, num_glyphs * sizeof(bool*));
-   if (!font->lut)
+   if (!(font->lut = (bool**)calloc(1, num_glyphs * sizeof(bool*))))
       goto error;
 
    /* Loop over all possible characters */

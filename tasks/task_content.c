@@ -60,7 +60,6 @@
 #include <array/rbuf.h>
 
 #include <retro_miscellaneous.h>
-#include <retro_assert.h>
 
 #ifdef HAVE_MENU
 #include "../menu/menu_driver.h"
@@ -84,22 +83,17 @@
 #include "../command.h"
 #include "../core_info.h"
 #include "../content.h"
+#include "../core.h"
 #include "../configuration.h"
 #include "../defaults.h"
+#include "../dynamic.h"
+#include "../file_path_special.h"
 #include "../frontend/frontend.h"
+#include "../msg_hash.h"
 #include "../playlist.h"
 #include "../paths.h"
 #include "../retroarch.h"
 #include "../runloop.h"
-#include "../verbosity.h"
-
-#include "../msg_hash.h"
-#include "../content.h"
-#include "../dynamic.h"
-#include "../retroarch.h"
-#include "../file_path_special.h"
-#include "../core.h"
-#include "../paths.h"
 #include "../verbosity.h"
 
 #ifdef HAVE_PRESENCE
@@ -119,6 +113,19 @@ struct content_stream
    uint32_t crc;
 };
 
+enum content_information_flags
+{
+   CONTENT_INFO_FLAG_BLOCK_EXTRACT               = (1 << 0),
+   CONTENT_INFO_FLAG_NEED_FULLPATH               = (1 << 1),
+   CONTENT_INFO_FLAG_SET_SUPPORTS_NO_GAME_ENABLE = (1 << 2),
+   CONTENT_INFO_FLAG_IS_IPS_PREF                 = (1 << 3),
+   CONTENT_INFO_FLAG_IS_BPS_PREF                 = (1 << 4),
+   CONTENT_INFO_FLAG_IS_UPS_PREF                 = (1 << 5),
+   CONTENT_INFO_FLAG_PATCH_IS_BLOCKED            = (1 << 6),
+   CONTENT_INFO_FLAG_BIOS_IS_MISSING             = (1 << 7),
+   CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING     = (1 << 8)
+};
+
 struct content_information_ctx
 {
    char *name_ips;
@@ -135,17 +142,7 @@ struct content_information_ctx
       unsigned size;
    } subsystem;
 
-   bool block_extract;
-   bool need_fullpath;
-   bool set_supports_no_game_enable;
-#ifdef HAVE_PATCH
-   bool is_ips_pref;
-   bool is_bps_pref;
-   bool is_ups_pref;
-   bool patch_is_blocked;
-#endif
-   bool bios_is_missing;
-   bool check_firmware_before_loading;
+   uint16_t flags;
 };
 
 /*************************************/
@@ -260,7 +257,7 @@ bool content_file_override_set(
          RBUF_RESIZE(p_content->content_override_list,
                num_entries + 1);
 
-         RARCH_LOG("[Content Override]: File Extension: '%s' - need_fullpath: %s, persistent_data: %s\n",
+         RARCH_LOG("[Content Override]: File Extension: '%3s' - need_fullpath: %s, persistent_data: %s\n",
                ext, overrides[i].need_fullpath ? "TRUE" : "FALSE",
                overrides[i].persistent_data ? "TRUE" : "FALSE");
 
@@ -724,11 +721,11 @@ static bool content_file_load_into_memory(
 
 #ifdef HAVE_PATCH
          /* Attempt to apply a patch. */
-         if (!content_ctx->patch_is_blocked)
+         if (!(content_ctx->flags & CONTENT_INFO_FLAG_PATCH_IS_BLOCKED))
             has_patch = patch_content(
-                  content_ctx->is_ips_pref,
-                  content_ctx->is_bps_pref,
-                  content_ctx->is_ups_pref,
+                  content_ctx->flags & CONTENT_INFO_FLAG_IS_IPS_PREF,
+                  content_ctx->flags & CONTENT_INFO_FLAG_IS_BPS_PREF,
+                  content_ctx->flags & CONTENT_INFO_FLAG_IS_UPS_PREF,
                   content_ctx->name_ips,
                   content_ctx->name_bps,
                   content_ctx->name_ups,
@@ -756,7 +753,7 @@ static bool content_file_load_into_memory(
                and then encode the CRC32 hash */
             strlcpy(p_content->pending_rom_crc_path, content_path,
                   sizeof(p_content->pending_rom_crc_path));
-            p_content->pending_rom_crc = true;
+            p_content->flags |= CONTENT_ST_FLAG_PENDING_ROM_CRC;
          }
       }
       else
@@ -1102,7 +1099,7 @@ static bool content_file_load(
                {
                   strlcpy(p_content->pending_rom_crc_path, content_path,
                         sizeof(p_content->pending_rom_crc_path));
-                  p_content->pending_rom_crc = true;
+                  p_content->flags |= CONTENT_ST_FLAG_PENDING_ROM_CRC;
                }
                else
                   p_content->rom_crc = 0;
@@ -1249,17 +1246,17 @@ static void content_file_set_attributes(
    }
    else
    {
-      const char *content_path = path_get(RARCH_PATH_CONTENT);
-      bool contentless         = false;
-      bool is_inited           = false;
       union string_list_elem_attr attr;
-
-      content_get_status(&contentless, &is_inited);
+      const char *content_path = path_get(RARCH_PATH_CONTENT);
+      uint8_t flags            = content_get_flags();
 
       CONTENT_FILE_ATTR_RESET(attr);
-      CONTENT_FILE_ATTR_SET_BLOCK_EXTRACT(attr, content_ctx->block_extract);
-      CONTENT_FILE_ATTR_SET_NEED_FULLPATH(attr, content_ctx->need_fullpath);
-      CONTENT_FILE_ATTR_SET_REQUIRED(attr, !contentless);
+      CONTENT_FILE_ATTR_SET_BLOCK_EXTRACT(attr, content_ctx->flags &
+CONTENT_INFO_FLAG_BLOCK_EXTRACT);
+      CONTENT_FILE_ATTR_SET_NEED_FULLPATH(attr, content_ctx->flags &
+CONTENT_INFO_FLAG_NEED_FULLPATH);
+      CONTENT_FILE_ATTR_SET_REQUIRED(attr, (!(flags &
+               CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT)));
 
 #if defined(HAVE_RUNAHEAD)
       /* If runahead is supported and we are not using
@@ -1272,8 +1269,9 @@ static void content_file_set_attributes(
 
       if (string_is_empty(content_path))
       {
-         if (contentless &&
-             content_ctx->set_supports_no_game_enable)
+         if (  (flags & CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT)
+             && content_ctx->flags 
+             & CONTENT_INFO_FLAG_SET_SUPPORTS_NO_GAME_ENABLE)
             string_list_append(content, "", attr);
       }
       else
@@ -1389,7 +1387,7 @@ static void content_load_init_wrap(
    }
 #endif
 
-   if (args->verbose)
+   if (args->flags & RARCH_MAIN_WRAP_FLAG_VERBOSE)
       argv[(*argc)++] = strldup("-v", sizeof("-v"));
 }
 
@@ -1419,24 +1417,20 @@ static bool content_load(content_ctx_info_t *info,
       malloc(sizeof(*wrap_args))))
       return false;
 
-   retro_assert(wrap_args);
-
    wrap_args->argv           = NULL;
    wrap_args->content_path   = NULL;
    wrap_args->sram_path      = NULL;
    wrap_args->state_path     = NULL;
    wrap_args->config_path    = NULL;
    wrap_args->libretro_path  = NULL;
-   wrap_args->verbose        = false;
-   wrap_args->no_content     = false;
-   wrap_args->touched        = false;
+   wrap_args->flags          = 0;
    wrap_args->argc           = 0;
 
    if (info->environ_get)
       info->environ_get(rarch_argc_ptr,
             rarch_argv_ptr, info->args, wrap_args);
 
-   if (wrap_args->touched)
+   if (wrap_args->flags & RARCH_MAIN_WRAP_FLAG_TOUCHED)
    {
       content_load_init_wrap(wrap_args, &rarch_argc, rarch_argv);
       memcpy(argv_copy, rarch_argv, sizeof(rarch_argv));
@@ -1458,7 +1452,7 @@ static bool content_load(content_ctx_info_t *info,
    if (!success)
       return false;
 
-   if (p_content->pending_subsystem_init)
+   if (p_content->flags & CONTENT_ST_FLAG_PENDING_SUBSYSTEM_INIT)
    {
       command_event(CMD_EVENT_CORE_INIT, NULL);
       content_clear_subsystem();
@@ -1488,7 +1482,7 @@ static bool content_load(content_ctx_info_t *info,
 #endif
 
    command_event(CMD_EVENT_HISTORY_INIT, NULL);
-   rarch_favorites_init();
+   retroarch_favorites_init();
    command_event(CMD_EVENT_RESUME, NULL);
    command_event(CMD_EVENT_VIDEO_SET_ASPECT_RATIO, NULL);
 
@@ -1508,12 +1502,17 @@ void menu_content_environment_get(int *argc, char *argv[],
    if (!wrap_args)
       return;
 
-   wrap_args->no_content             = sys_info->load_no_content;
+   if (sys_info->load_no_content)
+      wrap_args->flags        |= RARCH_MAIN_WRAP_FLAG_NO_CONTENT;
 
-   if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_VERBOSITY, NULL))
-      wrap_args->verbose       = verbosity_is_enabled();
+   if (!retroarch_override_setting_is_set(
+            RARCH_OVERRIDE_SETTING_VERBOSITY, NULL))
+   {
+      if (verbosity_is_enabled())
+         wrap_args->flags     |= RARCH_MAIN_WRAP_FLAG_VERBOSE;
+   }
 
-   wrap_args->touched          = true;
+   wrap_args->flags           |= RARCH_MAIN_WRAP_FLAG_TOUCHED;
    wrap_args->config_path      = NULL;
    wrap_args->sram_path        = NULL;
    wrap_args->state_path       = NULL;
@@ -1527,9 +1526,11 @@ void menu_content_environment_get(int *argc, char *argv[],
       wrap_args->state_path    = dir_get_ptr(RARCH_DIR_SAVESTATE);
    if (!path_is_empty(RARCH_PATH_CONTENT))
       wrap_args->content_path  = path_get(RARCH_PATH_CONTENT);
-   if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_LIBRETRO, NULL))
-      wrap_args->libretro_path = string_is_empty(path_get(RARCH_PATH_CORE)) ? NULL :
-         path_get(RARCH_PATH_CORE);
+   if (!retroarch_override_setting_is_set(
+            RARCH_OVERRIDE_SETTING_LIBRETRO, NULL))
+      wrap_args->libretro_path = string_is_empty(path_get(RARCH_PATH_CORE)) 
+         ? NULL
+         : path_get(RARCH_PATH_CORE);
 }
 
 /**
@@ -1543,18 +1544,16 @@ static void task_push_to_history_list(
       bool launched_from_cli,
       bool launched_from_companion_ui)
 {
-   bool            contentless = false;
-   bool            is_inited   = false;
    runloop_state_t *runloop_st = runloop_state_get_ptr();
-
-   content_get_status(&contentless, &is_inited);
+   uint8_t flags               = content_get_flags();
 
    /* Push entry to top of history playlist */
-   if (is_inited || contentless)
+   if (     (flags & CONTENT_ST_FLAG_IS_INITED) 
+         || (flags & CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT))
    {
       char tmp[PATH_MAX_LENGTH];
       const char *path_content       = path_get(RARCH_PATH_CONTENT);
-      struct retro_system_info *info = &runloop_state_get_ptr()->system.info;
+      struct retro_system_info *info = &runloop_st->system.info;
 
       if (!string_is_empty(path_content))
       {
@@ -1568,7 +1567,7 @@ static void task_push_to_history_list(
          tmp[0] = '\0';
 
 #ifdef HAVE_MENU
-      /* Push quick menu onto menu stack */
+      /* Push Quick Menu onto menu stack */
       if (launched_from_cli)
          menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
 #endif
@@ -1668,7 +1667,6 @@ static void task_push_to_history_list(
             /* The push function reads our entry as const, 
              * so these casts are safe */
             entry.path            = (char*)tmp;
-            entry.entry_slot      = runloop_st->entry_state_slot;
             entry.label           = (char*)label;
             entry.core_path       = (char*)core_path;
             entry.core_name       = (char*)core_name;
@@ -1677,6 +1675,7 @@ static void task_push_to_history_list(
             entry.subsystem_ident = (char*)path_get(RARCH_PATH_SUBSYSTEM);
             entry.subsystem_name  = (char*)subsystem_name;
             entry.subsystem_roms  = (struct string_list*)path_get_subsystem_list();
+            entry.entry_slot      = runloop_st->entry_state_slot;
 
             command_playlist_push_write(playlist_hist, &entry);
          }
@@ -1855,8 +1854,9 @@ static bool firmware_update_status(
 {
    char s[PATH_MAX_LENGTH];
    core_info_ctx_firmware_t firmware_info;
-   bool set_missing_firmware  = false;
-   core_info_t *core_info     = NULL;
+   bool set_missing_firmware         = false;
+   core_info_t *core_info            = NULL;
+   runloop_state_t       *runloop_st = runloop_state_get_ptr();
    
    core_info_get_current_core(&core_info);
 
@@ -1875,21 +1875,21 @@ static bool firmware_update_status(
       firmware_info.directory.system = s;
    }
 
-   RARCH_LOG("[Content]: Updating firmware status for: %s on %s\n",
+   RARCH_LOG("[Content]: Updating firmware status for: \"%s\" on \"%s\".\n",
          core_info->path,
          firmware_info.directory.system);
-
-   retroarch_ctl(RARCH_CTL_UNSET_MISSING_BIOS, NULL);
 
    core_info_list_update_missing_firmware(&firmware_info,
          &set_missing_firmware);
 
    if (set_missing_firmware)
-      retroarch_ctl(RARCH_CTL_SET_MISSING_BIOS, NULL);
+      runloop_st->missing_bios    = true;
+   else
+      runloop_st->missing_bios    = false;
 
    if (
-         content_ctx->bios_is_missing &&
-         content_ctx->check_firmware_before_loading)
+            (content_ctx->flags & CONTENT_INFO_FLAG_BIOS_IS_MISSING)
+         && (content_ctx->flags & CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING))
    {
       runloop_msg_queue_push(
             msg_hash_to_str(MSG_FIRMWARE),
@@ -1914,27 +1914,35 @@ bool task_push_start_dummy_core(content_ctx_info_t *content_info)
    rarch_system_info_t *sys_info              = &runloop_st->system;
    const char *path_dir_system                = settings->paths.directory_system;
    bool check_firmware_before_loading         = settings->bools.check_firmware_before_loading;
+#ifdef HAVE_PATCH
+   uint16_t rarch_flags                       = retroarch_get_flags();
+#endif
 
    if (!content_info)
       return false;
 
-   content_ctx.check_firmware_before_loading  = check_firmware_before_loading;
+   content_ctx.flags     = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
 #endif
-   content_ctx.bios_is_missing                = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+   if (runloop_st->missing_bios)
+      content_ctx.flags |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
    content_ctx.name_ips                       = NULL;
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
@@ -1998,24 +2006,33 @@ bool task_push_load_content_from_playlist_from_menu(
 #ifndef HAVE_DYNAMIC
    bool force_core_reload                     = settings->bools.always_reload_core_on_run_content;
 #endif
-
-   content_ctx.check_firmware_before_loading  = settings->bools.check_firmware_before_loading;
+   bool check_firmware_before_loading         = settings->bools.check_firmware_before_loading;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   uint16_t rarch_flags                       = retroarch_get_flags();
 #endif
-   content_ctx.bios_is_missing                = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+
+   content_ctx.flags     = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
+#ifdef HAVE_PATCH
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
+#endif
+   if (runloop_st->missing_bios)
+      content_ctx.flags |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
    content_ctx.name_ips                       = NULL;
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
@@ -2121,35 +2138,41 @@ end:
 
 bool task_push_start_current_core(content_ctx_info_t *content_info)
 {
+   uint16_t rarch_flags;
    content_information_ctx_t content_ctx;
-
-   content_state_t                 *p_content = content_state_get_ptr();
-   bool ret                                   = true;
-   settings_t *settings                       = config_get_ptr();
-   runloop_state_t *runloop_st                = runloop_state_get_ptr();
-   const char *path_dir_system                = settings->paths.directory_system;
-   bool check_firmware_before_loading         = settings->bools.check_firmware_before_loading;
+   bool ret                           = true;
+   content_state_t *p_content         = content_state_get_ptr();
+   settings_t *settings               = config_get_ptr();
+   runloop_state_t *runloop_st        = runloop_state_get_ptr();
+   const char *path_dir_system        = settings->paths.directory_system;
+   bool check_firmware_before_loading = settings->bools.check_firmware_before_loading;
 
    if (!content_info)
       return false;
 
-   content_ctx.check_firmware_before_loading  = check_firmware_before_loading;
+   rarch_flags                        = retroarch_get_flags();
+   content_ctx.flags                  = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
 #endif
-   content_ctx.bios_is_missing                = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+   if (runloop_st->missing_bios)
+      content_ctx.flags |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
    content_ctx.name_ips                       = NULL;
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
@@ -2196,7 +2219,7 @@ bool task_push_start_current_core(content_ctx_info_t *content_info)
    task_push_to_history_list(p_content, true, false, false);
 
 #ifdef HAVE_MENU
-   /* Push quick menu onto menu stack */
+   /* Push Quick Menu onto menu stack */
    menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
 #endif
 
@@ -2249,9 +2272,7 @@ bool task_push_load_contentless_core_from_menu(
    content_information_ctx_t content_ctx = {0};
    content_state_t *p_content            = content_state_get_ptr();
    bool ret                              = true;
-#if defined(HAVE_DYNAMIC)
    runloop_state_t *runloop_st           = runloop_state_get_ptr();
-#endif
    settings_t *settings                  = config_get_ptr();
    const char *path_dir_system           = settings->paths.directory_system;
    bool check_firmware_before_loading    = settings->bools.check_firmware_before_loading;
@@ -2261,8 +2282,12 @@ bool task_push_load_contentless_core_from_menu(
    if (string_is_empty(core_path))
       return false;
 
-   content_ctx.check_firmware_before_loading = check_firmware_before_loading;
-   content_ctx.bios_is_missing               = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+   content_ctx.flags                         = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags                     |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
+   if (runloop_st->missing_bios)
+      content_ctx.flags                     |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    if (!string_is_empty(path_dir_system))
       content_ctx.directory_system           = strdup(path_dir_system);
 
@@ -2310,13 +2335,13 @@ bool task_push_load_contentless_core_from_menu(
    command_event(CMD_EVENT_QUIT, NULL);
 #endif
 
-   /* Push quick menu onto menu stack */
    menu_entries_get_last_stack(NULL, &menu_label, NULL, NULL, NULL);
 
    if (string_is_equal(menu_label, msg_hash_to_str(MENU_ENUM_LABEL_CONTENTLESS_CORES_TAB)) ||
        string_is_equal(menu_label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_CONTENTLESS_CORES_LIST)))
       flush_menu = false;
 
+   /* Push Quick Menu onto menu stack */
    menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, &flush_menu);
 
 #ifdef HAVE_DYNAMIC
@@ -2336,8 +2361,8 @@ bool task_push_load_content_with_new_core_from_menu(
       retro_task_callback_t cb,
       void *user_data)
 {
+   uint16_t rarch_flags;
    content_information_ctx_t content_ctx;
-
    content_state_t                 *p_content = content_state_get_ptr();
    bool ret                                   = true;
    settings_t *settings                       = config_get_ptr();
@@ -2358,23 +2383,29 @@ bool task_push_load_content_with_new_core_from_menu(
             type, cb, user_data);
 #endif
 
-   content_ctx.check_firmware_before_loading  = check_firmware_before_loading;
+   rarch_flags                        = retroarch_get_flags();
+   content_ctx.flags                  = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
 #endif
-   content_ctx.bios_is_missing                = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+   if (runloop_st->missing_bios)
+      content_ctx.flags                      |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
    content_ctx.name_ips                       = NULL;
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
@@ -2420,7 +2451,7 @@ bool task_push_load_content_with_new_core_from_menu(
    command_event(CMD_EVENT_QUIT, NULL);
 #endif
 
-   /* Push quick menu onto menu stack */
+   /* Push Quick Menu onto menu stack */
    if (type != CORE_TYPE_DUMMY)
       menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
 
@@ -2457,41 +2488,51 @@ static bool task_load_content_internal(
    bool set_supports_no_game_enable           = settings->bools.set_supports_no_game_enable;
    const char *path_dir_system                = settings->paths.directory_system;
    const char *path_dir_cache                 = settings->paths.directory_cache;
-
-   content_ctx.check_firmware_before_loading  = check_firmware_before_loading;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   uint16_t rarch_flags                       = retroarch_get_flags();
 #endif
-   content_ctx.bios_is_missing                = retroarch_ctl(RARCH_CTL_IS_MISSING_BIOS, NULL);
+   content_ctx.flags                          = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
+#ifdef HAVE_PATCH
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
+#endif
+   if (runloop_st->missing_bios)
+      content_ctx.flags                      |= CONTENT_INFO_FLAG_BIOS_IS_MISSING;
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
    content_ctx.name_ips                       = NULL;
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
 
    if (sys_info)
    {
-      struct retro_system_info *system        = &runloop_state_get_ptr()->system.info;
+      struct retro_system_info *system        = &runloop_st->system.info;
 
-      content_ctx.set_supports_no_game_enable = set_supports_no_game_enable;
+      if (set_supports_no_game_enable)
+         content_ctx.flags |= CONTENT_INFO_FLAG_SET_SUPPORTS_NO_GAME_ENABLE;
 
       if (!string_is_empty(path_dir_cache))
          content_ctx.directory_cache          = strdup(path_dir_cache);
       if (!string_is_empty(system->valid_extensions))
          content_ctx.valid_extensions         = strdup(system->valid_extensions);
 
-      content_ctx.block_extract               = system->block_extract;
-      content_ctx.need_fullpath               = system->need_fullpath;
+      if (system->block_extract)
+         content_ctx.flags |= CONTENT_INFO_FLAG_BLOCK_EXTRACT;
+      if (system->need_fullpath)
+         content_ctx.flags |= CONTENT_INFO_FLAG_NEED_FULLPATH;
 
       content_ctx.subsystem.data              = sys_info->subsystem.data;
       content_ctx.subsystem.size              = sys_info->subsystem.size;
@@ -2545,6 +2586,29 @@ end:
    return ret;
 }
 
+static bool task_load_content_internal_wrap(
+      content_ctx_info_t *content_info,
+      enum rarch_core_type type,
+      bool load_from_companion_ui)
+{
+   /* Load content */
+   if (!task_load_content_internal(content_info, true, false,
+            load_from_companion_ui))
+      goto error;
+#ifdef HAVE_MENU
+   /* Push Quick Menu onto menu stack */
+   if (type != CORE_TYPE_DUMMY)
+      menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
+#endif
+   return true;
+
+error:
+#ifdef HAVE_MENU
+   retroarch_menu_running();
+#endif
+   return false;
+}
+
 bool task_push_load_content_with_new_core_from_companion_ui(
       const char *core_path,
       const char *fullpath,
@@ -2559,11 +2623,11 @@ bool task_push_load_content_with_new_core_from_companion_ui(
    runloop_state_t *runloop_st = runloop_state_get_ptr();
    content_state_t  *p_content = content_state_get_ptr();
 
-   path_set(RARCH_PATH_CONTENT, fullpath);
-   path_set(RARCH_PATH_CORE, core_path);
-
    p_content->companion_ui_db_name[0] = '\0';
    p_content->companion_ui_crc32[0]   = '\0';
+
+   path_set(RARCH_PATH_CONTENT, fullpath);
+   path_set(RARCH_PATH_CORE,    core_path);
 
    if (!string_is_empty(db_name))
       strlcpy(p_content->companion_ui_db_name,
@@ -2584,16 +2648,7 @@ bool task_push_load_content_with_new_core_from_companion_ui(
    else
       runloop_st->name.label[0] = '\0';
 
-   /* Load content */
-   if (!task_load_content_internal(content_info, true, false, true))
-      return false;
-
-#ifdef HAVE_MENU
-   /* Push quick menu onto menu stack */
-   menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
-#endif
-
-   return true;
+   return task_load_content_internal_wrap(content_info, CORE_TYPE_PLAIN, true);
 }
 
 bool task_push_load_content_from_cli(
@@ -2620,20 +2675,9 @@ bool task_push_start_builtin_core(
     * load the actual content. Can differ per mode. */
    runloop_set_current_core_type(type, true);
 
-   /* Load content */
-#ifdef HAVE_MENU
-   if (!task_load_content_internal(content_info, true, false, false))
-   {
-      retroarch_menu_running();
-      return false;
-   }
-   /* Push quick menu onto menu stack */
-   menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
-   return true;
-#else
-   return task_load_content_internal(content_info, true, false, false);
-#endif
+   return task_load_content_internal_wrap(content_info, type, false);
 }
+
 
 bool task_push_load_content_with_core(
       const char *fullpath,
@@ -2643,20 +2687,7 @@ bool task_push_load_content_with_core(
       void *user_data)
 {
    path_set(RARCH_PATH_CONTENT, fullpath);
-   /* Load content */
-#ifdef HAVE_MENU
-   if (!task_load_content_internal(content_info, true, false, false))
-   {
-      retroarch_menu_running();
-      return false;
-   }
-   /* Push quick menu onto menu stack */
-   if (type != CORE_TYPE_DUMMY)
-      menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
-   return true;
-#else
-   return task_load_content_internal(content_info, true, false, false);
-#endif
+   return task_load_content_internal_wrap(content_info, type, false);
 }
 
 bool task_push_load_content_with_current_core_from_companion_ui(
@@ -2678,21 +2709,7 @@ bool task_push_load_content_with_current_core_from_companion_ui(
     *   now, until someone can implement the required higher
     *   level functionality in 'win32_common.c' and 'ui_cocoa.m' */
    path_set(RARCH_PATH_CONTENT, fullpath);
-
-   /* Load content */
-#ifdef HAVE_MENU
-   if (!task_load_content_internal(content_info, true, false, false))
-   {
-      retroarch_menu_running();
-      return false;
-   }
-   /* Push quick menu onto menu stack */
-   if (type != CORE_TYPE_DUMMY)
-      menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
-   return true;
-#else
-   return task_load_content_internal(content_info, true, false, false);
-#endif
+   return task_load_content_internal_wrap(content_info, type, false);
 }
 
 
@@ -2705,41 +2722,24 @@ bool task_push_load_subsystem_with_core(
 {
    content_state_t  *p_content = content_state_get_ptr();
 
-   p_content->pending_subsystem_init = true;
-   /* Load content */
-#ifdef HAVE_MENU
-   if (!task_load_content_internal(content_info, true, false, false))
-   {
-      retroarch_menu_running();
-      return false;
-   }
-   /* Push quick menu onto menu stack */
-   if (type != CORE_TYPE_DUMMY)
-      menu_driver_ctl(RARCH_MENU_CTL_SET_PENDING_QUICK_MENU, NULL);
-   return true;
-#else
-   return task_load_content_internal(content_info, true, false, false);
-#endif
+   p_content->flags |= CONTENT_ST_FLAG_PENDING_SUBSYSTEM_INIT;
+   return task_load_content_internal_wrap(content_info, type, false);
 }
 
-void content_get_status(
-      bool *contentless,
-      bool *is_inited)
+uint8_t content_get_flags(void)
 {
    content_state_t  *p_content = content_state_get_ptr();
-
-   *contentless = p_content->core_does_not_need_content;
-   *is_inited   = p_content->is_inited;
+   return p_content->flags;
 }
 
 /* Clears the pending subsystem rom buffer*/
 void content_clear_subsystem(void)
 {
    unsigned i;
-   content_state_t  *p_content = content_state_get_ptr();
+   content_state_t  *p_content          = content_state_get_ptr();
 
-   p_content->pending_subsystem_rom_id    = 0;
-   p_content->pending_subsystem_init      = false;
+   p_content->pending_subsystem_rom_id  = 0;
+   p_content->flags                    &= ~CONTENT_ST_FLAG_PENDING_SUBSYSTEM_INIT;
 
    for (i = 0; i < RARCH_MAX_SUBSYSTEM_ROMS; i++)
    {
@@ -2761,14 +2761,15 @@ void content_set_subsystem(unsigned idx)
 
    /* Core fully loaded, use the subsystem data */
    if (system->subsystem.data)
-      subsystem                    = system->subsystem.data + idx;
+      subsystem                                 = system->subsystem.data + idx;
    /* Core not loaded completely, use the data we peeked on load core */
    else
-      subsystem                    = runloop_st->subsystem_data + idx;
+      subsystem                                 = runloop_st->subsystem_data + idx;
 
-   p_content->pending_subsystem_id = idx;
+   p_content->pending_subsystem_id              = idx;
 
-   if (subsystem && runloop_st->subsystem_current_count > 0)
+   if (      subsystem 
+         && (runloop_st->subsystem_current_count > 0))
    {
       strlcpy(p_content->pending_subsystem_ident,
          subsystem->ident, sizeof(p_content->pending_subsystem_ident));
@@ -2843,7 +2844,7 @@ void content_add_subsystem(const char* path)
          p_content->pending_subsystem_rom_id],
          path, pending_size);
    RARCH_LOG("[Subsystem]: Subsystem id: %d Subsystem ident:"
-         " %s Content ID: %d, Content Path: %s\n",
+         " %s Content ID: %d, Content Path: \"%s\".\n",
          p_content->pending_subsystem_id,
          p_content->pending_subsystem_ident,
          p_content->pending_subsystem_rom_id,
@@ -2855,13 +2856,13 @@ void content_add_subsystem(const char* path)
 void content_set_does_not_need_content(void)
 {
    content_state_t *p_content = content_state_get_ptr();
-   p_content->core_does_not_need_content = true;
+   p_content->flags |= CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT;
 }
 
 void content_unset_does_not_need_content(void)
 {
    content_state_t *p_content = content_state_get_ptr();
-   p_content->core_does_not_need_content = false;
+   p_content->flags &= ~CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT;
 }
 
 #ifndef CRC32_BUFFER_SIZE
@@ -2918,9 +2919,9 @@ static uint32_t file_crc32(uint32_t crc, const char *path)
 uint32_t content_get_crc(void)
 {
    content_state_t *p_content = content_state_get_ptr();
-   if (p_content->pending_rom_crc)
+   if (p_content->flags & CONTENT_ST_FLAG_PENDING_ROM_CRC)
    {
-      p_content->pending_rom_crc   = false;
+      p_content->flags &= ~CONTENT_ST_FLAG_PENDING_ROM_CRC;
       /* TODO/FIXME - file_crc32 has a 64MB max limit -
        * get rid of this function and find a better
        * way to calculate CRC based on the file */
@@ -2941,7 +2942,7 @@ char* content_get_subsystem_rom(unsigned index)
 bool content_is_inited(void)
 {
    content_state_t *p_content = content_state_get_ptr();
-   return p_content->is_inited;
+   return ((p_content->flags & CONTENT_ST_FLAG_IS_INITED) > 0);
 }
 
 void content_deinit(void)
@@ -2951,22 +2952,22 @@ void content_deinit(void)
    content_file_override_free(p_content);
    content_file_list_free(p_content->content_list);
 
-   p_content->content_list                 = NULL;
-   p_content->rom_crc                      = 0;
-   p_content->is_inited                    = false;
-   p_content->core_does_not_need_content   = false;
-   p_content->pending_rom_crc              = false;
+   p_content->content_list    = NULL;
+   p_content->rom_crc         = 0;
+   p_content->flags          &= ~(CONTENT_ST_FLAG_PENDING_ROM_CRC
+                              | CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT
+                              | CONTENT_ST_FLAG_IS_INITED);
 }
 
 /* Set environment variables before a subsystem load */
 void content_set_subsystem_info(void)
 {
    content_state_t *p_content = content_state_get_ptr();
-   if (!p_content->pending_subsystem_init)
+   if (!(p_content->flags & CONTENT_ST_FLAG_PENDING_SUBSYSTEM_INIT))
       return;
 
    path_set(RARCH_PATH_SUBSYSTEM, p_content->pending_subsystem_ident);
-   path_set_special(p_content->pending_subsystem_roms,
+   runloop_path_set_special(p_content->pending_subsystem_roms,
          p_content->pending_subsystem_rom_num);
 }
 
@@ -2976,28 +2977,38 @@ bool content_init(void)
 {
    struct string_list content;
    content_information_ctx_t content_ctx;
-   enum msg_hash_enums error_enum             = MSG_UNKNOWN;
-   content_state_t *p_content                 = content_state_get_ptr();
+   enum msg_hash_enums error_enum     = MSG_UNKNOWN;
+   content_state_t *p_content         = content_state_get_ptr();
 
-   bool ret                                   = true;
-   char *error_string                         = NULL;
-   runloop_state_t *runloop_st                = runloop_state_get_ptr();
-   rarch_system_info_t *sys_info              = &runloop_st->system;
-   settings_t *settings                       = config_get_ptr();
-   bool check_firmware_before_loading         = settings->bools.check_firmware_before_loading;
-   bool set_supports_no_game_enable           = settings->bools.set_supports_no_game_enable;
-   const char *path_dir_system                = settings->paths.directory_system;
-   const char *path_dir_cache                 = settings->paths.directory_cache;
+   bool ret                           = true;
+   char *error_string                 = NULL;
+   runloop_state_t *runloop_st        = runloop_state_get_ptr();
+   rarch_system_info_t *sys_info      = &runloop_st->system;
+   settings_t *settings               = config_get_ptr();
+   bool check_firmware_before_loading = settings->bools.check_firmware_before_loading;
+   bool set_supports_no_game_enable   = settings->bools.set_supports_no_game_enable;
+   const char *path_dir_system        = settings->paths.directory_system;
+   const char *path_dir_cache         = settings->paths.directory_cache;
+#ifdef HAVE_PATCH
+   uint16_t rarch_flags               = retroarch_get_flags();
+#endif
 
    content_file_list_free(p_content->content_list);
-   p_content->content_list                    = NULL;
+   p_content->content_list            = NULL;
 
-   content_ctx.check_firmware_before_loading  = check_firmware_before_loading;
+   content_ctx.flags                  = 0;
+
+   if (check_firmware_before_loading)
+      content_ctx.flags |= CONTENT_INFO_FLAG_CHECK_FW_BEFORE_LOADING;
 #ifdef HAVE_PATCH
-   content_ctx.is_ips_pref                    = retroarch_ctl(RARCH_CTL_IS_IPS_PREF, NULL);
-   content_ctx.is_bps_pref                    = retroarch_ctl(RARCH_CTL_IS_BPS_PREF, NULL);
-   content_ctx.is_ups_pref                    = retroarch_ctl(RARCH_CTL_IS_UPS_PREF, NULL);
-   content_ctx.patch_is_blocked               = runloop_st->patch_blocked;
+   if (rarch_flags & RARCH_FLAGS_IPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_IPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_BPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_BPS_PREF;
+   if (rarch_flags & RARCH_FLAGS_UPS_PREF)
+      content_ctx.flags |= CONTENT_INFO_FLAG_IS_UPS_PREF;
+   if (runloop_st->flags & RUNLOOP_FLAG_PATCH_BLOCKED)
+      content_ctx.flags |= CONTENT_INFO_FLAG_PATCH_IS_BLOCKED;
 #endif
    content_ctx.directory_system               = NULL;
    content_ctx.directory_cache                = NULL;
@@ -3005,9 +3016,6 @@ bool content_init(void)
    content_ctx.name_bps                       = NULL;
    content_ctx.name_ups                       = NULL;
    content_ctx.valid_extensions               = NULL;
-   content_ctx.block_extract                  = false;
-   content_ctx.need_fullpath                  = false;
-   content_ctx.set_supports_no_game_enable    = false;
 
    content_ctx.subsystem.data                 = NULL;
    content_ctx.subsystem.size                 = 0;
@@ -3021,25 +3029,28 @@ bool content_init(void)
 
    if (sys_info)
    {
-      struct retro_system_info *system        = &runloop_state_get_ptr()->system.info;
+      struct retro_system_info *system = &runloop_st->system.info;
 
-      content_ctx.set_supports_no_game_enable = set_supports_no_game_enable;
+      if (set_supports_no_game_enable)
+         content_ctx.flags            |= CONTENT_INFO_FLAG_SET_SUPPORTS_NO_GAME_ENABLE;
 
       if (!string_is_empty(path_dir_system))
-         content_ctx.directory_system         = strdup(path_dir_system);
+         content_ctx.directory_system  = strdup(path_dir_system);
       if (!string_is_empty(path_dir_cache))
-         content_ctx.directory_cache          = strdup(path_dir_cache);
+         content_ctx.directory_cache   = strdup(path_dir_cache);
       if (!string_is_empty(system->valid_extensions))
-         content_ctx.valid_extensions         = strdup(system->valid_extensions);
+         content_ctx.valid_extensions  = strdup(system->valid_extensions);
 
-      content_ctx.block_extract               = system->block_extract;
-      content_ctx.need_fullpath               = system->need_fullpath;
+      if (system->block_extract)
+         content_ctx.flags            |= CONTENT_INFO_FLAG_BLOCK_EXTRACT;
+      if (system->need_fullpath)
+         content_ctx.flags            |= CONTENT_INFO_FLAG_NEED_FULLPATH;
 
-      content_ctx.subsystem.data              = sys_info->subsystem.data;
-      content_ctx.subsystem.size              = sys_info->subsystem.size;
+      content_ctx.subsystem.data       = sys_info->subsystem.data;
+      content_ctx.subsystem.size       = sys_info->subsystem.size;
    }
 
-   p_content->is_inited = true;
+   p_content->flags                   |= CONTENT_ST_FLAG_IS_INITED;
 
    if (string_list_initialize(&content))
    {
@@ -3085,13 +3096,10 @@ bool content_init(void)
    if (error_string)
    {
       if (ret)
-      {
          RARCH_LOG("[Content]: %s\n", error_string);
-      }
       else
-      {
          RARCH_ERR("[Content]: %s\n", error_string);
-      }
+
       /* Do not flush the message queue here
        * > This allows any core-generated error messages
        *   to propagate through to the frontend */

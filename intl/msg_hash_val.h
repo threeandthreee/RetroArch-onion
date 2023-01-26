@@ -45,10 +45,6 @@ MSG_HASH(
    "Explorar"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CONTENTLESS_CORES_TAB,
-   "Nuclis independents"
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_ADD_TAB,
    "Afegir continguts"
    )
@@ -291,10 +287,6 @@ MSG_HASH(
    "Regira tot el contingut mitjançant una interfície de búsqueda categoritzada que coincidisca amb la base de dades."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_GOTO_CONTENTLESS_CORES,
-   "Nuclis independents"
-   )
-MSG_HASH(
    MENU_ENUM_SUBLABEL_GOTO_CONTENTLESS_CORES,
    "Ací apareixeran els nuclis instal·lats que puguen funcionar sense haver de carregar un contingut."
    )
@@ -528,14 +520,6 @@ MSG_HASH(
    "Preven qualsevol modificació sobre el nucli actual instal·lat. Esta opció pot fer-se servir per evitar actualitzacions no desitjades si un contingut requerix d'una versió específica d'un nucli (p.ex. conjunts de ROMs d'arcade)."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CORE_SET_STANDALONE_EXEMPT,
-   "Excloure del menú de nuclis independents"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_CORE_SET_STANDALONE_EXEMPT,
-   "Preven que este nucli siga mostrat a la secció/menú 'Nuclis independents'. Només tindrà efecte quan el mode de visualització estiga ajustat com a 'Personalitzat'."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_CORE_DELETE,
    "Eliminar nucli"
    )
@@ -593,14 +577,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_CPU_FEATURES,
    "Característiques del processador"
-   )
-MSG_HASH( /* FIXME Colon should be handled in menu_display.c like the rest */
-   MENU_ENUM_LABEL_VALUE_CPU_CORES,
-   "Nuclis del processador"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_CPU_CORES,
-   "Quantitat de nuclis que té el processador del maquinari."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_IDENTIFIER,
@@ -1016,20 +992,16 @@ MSG_HASH(
    "Carregar configuració"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
-   "Reiniciar per defecte"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_RESET_TO_DEFAULT_CONFIG,
-   "Reiniciar la configuració actual als valors per defecte."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SAVE_CURRENT_CONFIG,
    "Guardar configuració actual"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SAVE_NEW_CONFIG,
    "Guardar nova configuració"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
+   "Reiniciar per defecte"
    )
 
 /* Main Menu > Help */
@@ -1450,10 +1422,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_SMOOTH,
    "Filtrat bilineal"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_VIDEO_SMOOTH,
-   "Afegir un poc de desenfocament a la imatge per suavitzar la pixelació. Esta opció té una mica d'impacte en l'execució del joc."
    )
 #if defined(DINGUX)
 MSG_HASH(
@@ -1955,10 +1923,6 @@ MSG_HASH(
    "La sincronització vertical es mantindrà activa fins que el rendiment siga inferior al necessari per mantindre la freqüència de refresc d'imatge del monitor/pantalla. Pot reduir el sacseig de la imatge quan el rendiment cau per baix de la velocitat real, alforrant recursos energètics."
    )
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_VIDEO_FRAME_DELAY,
-   "Abaixa la latència a canvi d'un major risc de sacsejos en la imatge. Afegix un retardament posterior a la sincronització vertical (VSync) en mil·lisegons."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_AUTO,
    "Retardament automàtic de fotogrames"
    )
@@ -2145,6 +2109,10 @@ MSG_HASH(
    "Força el dispositiu que usa el controlador d’àudio. Això depèn del controlador."
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_HELP_AUDIO_DEVICE,
+   "Força el dispositiu que usa el controlador d’àudio. Això depèn del controlador."
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_AUDIO_LATENCY,
    "Latència de l'àudio (ms)"
    )
@@ -2228,6 +2196,8 @@ MSG_HASH(
 
 #if defined(HAVE_DINPUT) || defined(HAVE_WINRAWINPUT)
 #endif
+#ifdef ANDROID
+#endif
 MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_SENSORS_ENABLE,
    "Engega l'entrada des dels sensors d'acceleròmetre, giroscopi i luminància, si està suportat pel maquinari actual. Pot tenir un impacte sobre el rendiment i/o un increment de consum energètic en algunes plataformes."
@@ -2259,39 +2229,37 @@ MSG_HASH(
 /* Settings > Input > Menu Controls */
 
 
-
 /* Settings > Input > Hotkeys */
 
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_QUIT_KEY,
-   "Tancar RetroArch"
-   )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_ENABLE_HOTKEY,
    "Habilitar botons d'accés directe"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_QUIT_KEY,
+   "Tancar RetroArch"
+   )
+
+
+
+
+
+
+
+
+
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_AI_SERVICE,
    "Servei d'IA"
    )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_AI_SERVICE,
-   "Captura una imatge del contingut actual i traduïx o llegix en veu alta els textos que hi hagen.\nCal haver activat i configurat el servei d'IA."
-   )
+
+
 
 /* Settings > Input > Port # Controls */
 
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_ADC_TYPE,
-   "Usa la palanca analògica especificada com a senyal d'entrada per a la creueta. Si el nucli té suport natiu de control analògic, les assignacions de la creueta es desactivarán llevat que s'haja seleccionat una opció forçada. Forçant les assignacions de creueta, el nucli no rebrá cap entrada analògica de la palanca especificada."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_REMAP_PORT,
    "Port assignat"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_REMAP_PORT,
-   "Especifica quin dels ports del nucli (usualment, el número del jugador) rebrà les senyals d'entrada del port de comandament %u del front-end."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_A,
@@ -2654,10 +2622,6 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MENU_ADD_CONTENT_ENTRY_DISPLAY_MAIN_TAB,
    "Menú principal"
    )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_CONTENT_SHOW_CONTENTLESS_CORES,
-   "Especifica el tipus de nucli (si hi han) que se voran en el menú de 'Nuclis independents'. Quan selecciones 'Personalitzat', la visualització dels nuclis individuals podran ser connectats i desconnectats a través del menú 'Gestió de nuclis'. (Cal reinici en Ozone/XMB)"
-   )
 
 /* Settings > User Interface > Menu Item Visibility > Quick Menu */
 
@@ -2715,6 +2679,12 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_CHEEVOS_ENABLE,
    "Assoliments"
    )
+
+/* Settings > Achievements > Appearance */
+
+
+/* Settings > Achievements > Visibility */
+
 
 /* Settings > Network */
 

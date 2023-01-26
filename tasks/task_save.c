@@ -26,7 +26,6 @@
 #endif
 
 #include <compat/strl.h>
-#include <retro_assert.h>
 #include <lists/string_list.h>
 #include <streams/interface_stream.h>
 #include <streams/file_stream.h>
@@ -54,8 +53,9 @@
 #include "../core_info.h"
 #include "../file_path_special.h"
 #include "../configuration.h"
+#include "../gfx/video_driver.h"
 #include "../msg_hash.h"
-#include "../retroarch.h"
+#include "../runloop.h"
 #include "../verbosity.h"
 #include "tasks_internal.h"
 #ifdef HAVE_CHEATS
@@ -99,6 +99,18 @@ struct sram_block
    unsigned type;
 };
 
+enum save_task_state_flags
+{
+   SAVE_TASK_FLAG_LOAD_TO_BACKUP_BUFF   = (1 << 0),
+   SAVE_TASK_FLAG_AUTOLOAD              = (1 << 1),
+   SAVE_TASK_FLAG_AUTOSAVE              = (1 << 2),
+   SAVE_TASK_FLAG_UNDO_SAVE             = (1 << 3),
+   SAVE_TASK_FLAG_MUTE                  = (1 << 4),
+   SAVE_TASK_FLAG_THUMBNAIL_ENABLE      = (1 << 5),
+   SAVE_TASK_FLAG_HAS_VALID_FB          = (1 << 6),
+   SAVE_TASK_FLAG_COMPRESS_FILES        = (1 << 7)
+};
+
 typedef struct
 {
    intfstream_t *file;
@@ -109,15 +121,8 @@ typedef struct
    ssize_t written;
    ssize_t bytes_read;
    int state_slot;
+   uint8_t flags;
    char path[PATH_MAX_LENGTH];
-   bool load_to_backup_buffer;
-   bool autoload;
-   bool autosave;
-   bool undo_save;
-   bool mute;
-   bool thumbnail_enable;
-   bool has_valid_framebuffer;
-   bool compress_files;
 } save_task_state_t;
 
 #ifdef HAVE_THREADS
@@ -128,6 +133,12 @@ struct autosave_st
 {
    autosave_t **list;
    unsigned num;
+};
+
+enum autosave_flags
+{
+   AUTOSAVE_FLAG_QUIT           = (1 << 0),
+   AUTOSAVE_FLAG_COMPRESS_FILES = (1 << 1)
 };
 
 struct autosave
@@ -141,8 +152,7 @@ struct autosave
    sthread_t *thread;
    size_t bufsize;
    unsigned interval;
-   bool quit;
-   bool compress_files;
+   uint8_t flags;
 };
 #endif
 
@@ -203,7 +213,7 @@ static void autosave_thread(void *data)
          intfstream_t *file = NULL;
 
          /* Should probably deal with this more elegantly. */
-         if (save->compress_files)
+         if (save->flags & AUTOSAVE_FLAG_COMPRESS_FILES)
             file = intfstream_open_rzip_file(save->path,
                   RETRO_VFS_FILE_ACCESS_WRITE);
          else
@@ -221,7 +231,7 @@ static void autosave_thread(void *data)
 
       slock_lock(save->cond_lock);
 
-      if (save->quit)
+      if (save->flags & AUTOSAVE_FLAG_QUIT)
       {
          slock_unlock(save->cond_lock);
          break;
@@ -261,10 +271,11 @@ static autosave_t *autosave_new(const char *path,
    if (!handle)
       return NULL;
 
-   handle->quit                  = false;
+   handle->flags                 = 0;
    handle->bufsize               = size;
    handle->interval              = interval;
-   handle->compress_files        = compress;
+   if (compress)
+      handle->flags             |= AUTOSAVE_FLAG_COMPRESS_FILES;
    handle->retro_buffer          = data;
    handle->path                  = path;
 
@@ -295,7 +306,7 @@ static autosave_t *autosave_new(const char *path,
 static void autosave_free(autosave_t *handle)
 {
    slock_lock(handle->cond_lock);
-   handle->quit = true;
+   handle->flags |= AUTOSAVE_FLAG_QUIT;
    slock_unlock(handle->cond_lock);
    scond_signal(handle->cond);
    sthread_join(handle->thread);
@@ -592,7 +603,8 @@ static void task_save_handler_finished(retro_task_t *task,
 
    if (state->data)
    {
-      if (state->undo_save && state->data == undo_save_buf.data)
+      if (     (state->flags & SAVE_TASK_FLAG_UNDO_SAVE)
+            && (state->data == undo_save_buf.data))
          undo_save_buf.data = NULL;
       free(state->data);
       state->data = NULL;
@@ -723,7 +735,7 @@ static void task_save_handler(retro_task_t *task)
 
    if (!state->file)
    {
-      if (state->compress_files)
+      if (state->flags & SAVE_TASK_FLAG_COMPRESS_FILES)
          state->file   = intfstream_open_rzip_file(
                state->path, RETRO_VFS_FILE_ACCESS_WRITE);
       else
@@ -758,12 +770,12 @@ static void task_save_handler(retro_task_t *task)
       size_t err_size = 8192 * sizeof(char);
       char *err       = (char*)malloc(err_size);
 
-      if (state->undo_save)
+      if (state->flags & SAVE_TASK_FLAG_UNDO_SAVE)
       {
          const char *failed_undo_str = msg_hash_to_str(
                MSG_FAILED_TO_UNDO_SAVE_STATE);
          RARCH_ERR("[State]: %s \"%s\".\n", failed_undo_str,
-            undo_save_buf.path);
+               undo_save_buf.path);
          err[0]      = '\0';
          snprintf(err, err_size - 1, "%s \"RAM\".", failed_undo_str);
       }
@@ -789,7 +801,7 @@ static void task_save_handler(retro_task_t *task)
 
       task_free_title(task);
 
-      if (state->undo_save)
+      if (state->flags & SAVE_TASK_FLAG_UNDO_SAVE)
          msg = strdup(msg_hash_to_str(MSG_RESTORED_OLD_SAVE_STATE));
       else if (state->state_slot < 0)
          msg = strdup(msg_hash_to_str(MSG_SAVED_STATE_TO_SLOT_AUTO));
@@ -840,13 +852,13 @@ static bool task_push_undo_save_state(const char *path, void *data, size_t size)
    strlcpy(state->path, path, sizeof(state->path));
    state->data                   = data;
    state->size                   = size;
-   state->undo_save              = true;
+   state->flags                 |= SAVE_TASK_FLAG_UNDO_SAVE;
    state->state_slot             = settings->ints.state_slot;
-   state->has_valid_framebuffer  = video_driver_cached_frame_has_valid_framebuffer();
+   if (video_driver_cached_frame_has_valid_framebuffer())
+      state->flags              |= SAVE_TASK_FLAG_HAS_VALID_FB;
 #if defined(HAVE_ZLIB)
-   state->compress_files         = settings->bools.savestate_file_compression;
-#else
-   state->compress_files         = false;
+   if (settings->bools.savestate_file_compression)
+      state->flags              |= SAVE_TASK_FLAG_COMPRESS_FILES;
 #endif
    task->type                    = TASK_TYPE_BLOCKING;
    task->state                   = state;
@@ -939,12 +951,12 @@ static void task_load_handler(retro_task_t *task)
        * data */
       if (!(state->file = intfstream_open_rzip_file(state->path,
                   RETRO_VFS_FILE_ACCESS_READ)))
-         goto end;
+         goto not_found;
 #else
       if (!(state->file = intfstream_open_file(state->path,
                   RETRO_VFS_FILE_ACCESS_READ,
                   RETRO_VFS_FILE_ACCESS_HINT_NONE)))
-         goto end;
+         goto not_found;
 #endif
 
       if ((state->size = intfstream_get_size(state->file)) < 0)
@@ -969,7 +981,7 @@ static void task_load_handler(retro_task_t *task)
 
    if (task_get_cancelled(task) || bytes_read != remaining)
    {
-      if (state->autoload)
+      if (state->flags & SAVE_TASK_FLAG_AUTOLOAD)
       {
          char *msg = (char*)malloc(8192 * sizeof(char));
 
@@ -978,7 +990,7 @@ static void task_load_handler(retro_task_t *task)
          snprintf(msg,
                8192 * sizeof(char),
                msg_hash_to_str(MSG_AUTOLOADING_SAVESTATE_FAILED),
-               state->path);
+               path_basename(state->path));
          task_set_error(task, strdup(msg));
          free(msg);
       }
@@ -1000,13 +1012,14 @@ static void task_load_handler(retro_task_t *task)
          size_t msg_size   = 8192 * sizeof(char);
          char *msg         = (char*)malloc(msg_size);
 
-         if (state->autoload)
+         msg[0]            = '\0';
+
+         if (state->flags & SAVE_TASK_FLAG_AUTOLOAD)
          {
-            msg[0]         = '\0';
             // snprintf(msg,
             //       msg_size - 1,
             //       msg_hash_to_str(MSG_AUTOLOADING_SAVESTATE_SUCCEEDED),
-            //       state->path);
+            //       path_basename(state->path));
          }
          else
          {
@@ -1015,13 +1028,9 @@ static void task_load_handler(retro_task_t *task)
                      msg_hash_to_str(MSG_LOADED_STATE_FROM_SLOT_AUTO),
                      msg_size - 1);
             else
-            {
-               msg[0]      = '\0';
                snprintf(msg, msg_size - 1,
                      msg_hash_to_str(MSG_LOADED_STATE_FROM_SLOT),
                      state->state_slot);
-            }
-            task_set_title(task, strdup(msg));
          }
 
          free(msg);
@@ -1031,6 +1040,23 @@ static void task_load_handler(retro_task_t *task)
    }
 
    return;
+
+not_found:
+   {
+      size_t msg_size   = 8192 * sizeof(char);
+      char *msg         = (char*)malloc(msg_size);
+
+      msg[0] = '\0';
+
+      snprintf(msg,
+            msg_size - 1,
+            "%s \"%s\".",
+            msg_hash_to_str(MSG_FAILED_TO_LOAD_STATE),
+            path_basename(state->path));
+
+      task_set_title(task, strdup(msg));
+      free(msg);
+   }
 
 end:
    task_load_handler_finished(task, state);
@@ -1158,7 +1184,7 @@ static void content_load_state_cb(retro_task_t *task,
    /* This means we're backing up the file in memory, 
     * so content_undo_save_state()
     * can restore it */
-   if (load_data->load_to_backup_buffer)
+   if (load_data->flags & SAVE_TASK_FLAG_LOAD_TO_BACKUP_BUFF)
    {
       /* If we were previously backing up a file, let go of it first */
       if (undo_save_buf.data)
@@ -1283,9 +1309,10 @@ static void save_state_cb(retro_task_t *task,
    settings_t     *settings   = config_get_ptr();
    const char *dir_screenshot = settings->paths.directory_screenshot; 
 
-   if (state->thumbnail_enable)
+   if (state->flags & SAVE_TASK_FLAG_THUMBNAIL_ENABLE)
       take_screenshot(dir_screenshot,
-            path, true, state->has_valid_framebuffer, false, true);
+            path, true,
+            state->flags & SAVE_TASK_FLAG_HAS_VALID_FB, false, true);
    free(path);
 #endif
 
@@ -1312,15 +1339,24 @@ static void task_push_save_state(const char *path, void *data, size_t size, bool
    strlcpy(state->path, path, sizeof(state->path));
    state->data                   = data;
    state->size                   = size;
-   state->autosave               = autosave;
-   state->mute                   = autosave; /* don't show OSD messages if we are auto-saving */
-   state->thumbnail_enable       = settings->bools.savestate_thumbnail_enable;
+   /* Don't show OSD messages if we are auto-saving */
+   if (autosave)
+      state->flags              |= (SAVE_TASK_FLAG_AUTOSAVE |
+                                    SAVE_TASK_FLAG_MUTE);
+   if (settings->bools.savestate_thumbnail_enable)
+   {
+      /* Delay OSD messages and widgets for a few frames
+       * to prevent GPU screenshots from having notifications */
+      runloop_state_t *runloop_st = runloop_state_get_ptr();
+      runloop_st->msg_queue_delay = 12;
+      state->flags               |= SAVE_TASK_FLAG_THUMBNAIL_ENABLE;
+   }
    state->state_slot             = settings->ints.state_slot;
-   state->has_valid_framebuffer  = video_driver_cached_frame_has_valid_framebuffer();
+   if (video_driver_cached_frame_has_valid_framebuffer())
+      state->flags              |= SAVE_TASK_FLAG_HAS_VALID_FB;
 #if defined(HAVE_ZLIB)
-   state->compress_files         = settings->bools.savestate_file_compression;
-#else
-   state->compress_files         = false;
+   if (settings->bools.savestate_file_compression)
+      state->flags              |= SAVE_TASK_FLAG_COMPRESS_FILES;
 #endif
 
    task->type                    = TASK_TYPE_BLOCKING;
@@ -1328,7 +1364,7 @@ static void task_push_save_state(const char *path, void *data, size_t size, bool
    task->handler                 = task_save_handler;
    task->callback                = save_state_cb;
    task->title                   = strdup(msg_hash_to_str(MSG_SAVING_STATE));
-   task->mute                    = state->mute;
+   task->mute                    = state->flags & SAVE_TASK_FLAG_MUTE;
 
    if (!task_queue_push(task))
    {
@@ -1370,7 +1406,7 @@ static void content_load_and_save_state_cb(retro_task_t *task,
    char                  *path = strdup(load_data->path);
    void                  *data = load_data->undo_data;
    size_t                 size = load_data->undo_size;
-   bool               autosave = load_data->autosave;
+   bool               autosave = load_data->flags & SAVE_TASK_FLAG_AUTOSAVE;
 
    content_load_state_cb(task, task_data, user_data, error);
 
@@ -1408,21 +1444,22 @@ static void task_push_load_and_save_state(const char *path, void *data,
 
 
    strlcpy(state->path, path, sizeof(state->path));
-   state->load_to_backup_buffer  = load_to_backup_buffer;
+   if (load_to_backup_buffer)
+      state->flags              |= SAVE_TASK_FLAG_LOAD_TO_BACKUP_BUFF;
    state->undo_size              = size;
    state->undo_data              = data;
-   state->autosave               = autosave;
-   state->mute                   = autosave; /* don't show OSD messages if we 
-                                    are auto-saving */
+   /* Don't show OSD messages if we are auto-saving */
+   if (autosave)
+      state->flags              |= (SAVE_TASK_FLAG_AUTOSAVE |
+                                    SAVE_TASK_FLAG_MUTE);
    if (load_to_backup_buffer)
-      state->mute                = true;
+      state->flags              |= SAVE_TASK_FLAG_MUTE;
    state->state_slot             = settings->ints.state_slot;
-   state->has_valid_framebuffer  = 
-      video_driver_cached_frame_has_valid_framebuffer();
+   if (video_driver_cached_frame_has_valid_framebuffer())
+      state->flags              |= SAVE_TASK_FLAG_HAS_VALID_FB;
 #if defined(HAVE_ZLIB)
-   state->compress_files         = settings->bools.savestate_file_compression;
-#else
-   state->compress_files         = false;
+   if (settings->bools.savestate_file_compression)
+      state->flags              |= SAVE_TASK_FLAG_COMPRESS_FILES;
 #endif
 
    task->state                   = state;
@@ -1430,7 +1467,7 @@ static void task_push_load_and_save_state(const char *path, void *data,
    task->handler                 = task_load_handler;
    task->callback                = content_load_and_save_state_cb;
    task->title                   = strdup(msg_hash_to_str(MSG_LOADING_STATE));
-   task->mute                    = state->mute;
+   task->mute                    = state->flags & SAVE_TASK_FLAG_MUTE;
 
    if (!task_queue_push(task))
    {
@@ -1573,6 +1610,28 @@ void content_wait_for_save_state_task(void)
    task_queue_wait(content_save_state_in_progress, NULL);
 }
 
+
+static bool task_load_state_finder(retro_task_t *task, void *user_data)
+{
+   return (task && task->handler == task_load_handler);
+}
+
+/* Returns true if a load state task is in progress */
+bool content_load_state_in_progress(void* data)
+{
+   task_finder_data_t find_data;
+
+   find_data.func     = task_load_state_finder;
+   find_data.userdata = NULL;
+
+   return task_queue_find(&find_data);
+}
+
+void content_wait_for_load_state_task(void)
+{
+   task_queue_wait(content_load_state_in_progress, NULL);
+}
+
 /**
  * content_load_state:
  * @path                  : path that state will be loaded from.
@@ -1602,15 +1661,16 @@ bool content_load_state(const char *path,
       goto error;
 
    strlcpy(state->path, path, sizeof(state->path));
-   state->load_to_backup_buffer = load_to_backup_buffer;
-   state->autoload              = autoload;
+   if (load_to_backup_buffer)
+      state->flags             |= SAVE_TASK_FLAG_LOAD_TO_BACKUP_BUFF;
+   if (autoload)
+      state->flags             |= SAVE_TASK_FLAG_AUTOLOAD;
    state->state_slot            = settings->ints.state_slot;
-   state->has_valid_framebuffer = 
-      video_driver_cached_frame_has_valid_framebuffer();
+   if (video_driver_cached_frame_has_valid_framebuffer())
+      state->flags             |= SAVE_TASK_FLAG_HAS_VALID_FB;
 #if defined(HAVE_ZLIB)
-   state->compress_files        = settings->bools.savestate_file_compression;
-#else
-   state->compress_files        = false;
+   if (settings->bools.savestate_file_compression)
+      state->flags             |= SAVE_TASK_FLAG_COMPRESS_FILES;
 #endif
 
    task->type                   = TASK_TYPE_BLOCKING;
@@ -2107,7 +2167,6 @@ void path_deinit_savefile(void)
 void path_init_savefile_new(void)
 {
    task_save_files = string_list_new();
-   retro_assert(task_save_files);
 }
 
 void *savefile_ptr_get(void)

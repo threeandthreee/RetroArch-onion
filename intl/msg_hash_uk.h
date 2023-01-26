@@ -45,10 +45,6 @@ MSG_HASH(
    "Огляд"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CONTENTLESS_CORES_TAB,
-   "Автономні ядра"
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_ADD_TAB,
    "Імпорт вмісту"
    )
@@ -291,10 +287,6 @@ MSG_HASH(
    "Переглянути весь вміст, відомості про який є у базі даних, через пошук за категоріями."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_GOTO_CONTENTLESS_CORES,
-   "Автономні ядра"
-   )
-MSG_HASH(
    MENU_ENUM_SUBLABEL_GOTO_CONTENTLESS_CORES,
    "Тут будуть відображатися встановлені ядра, які можуть працювати без завантаження вмісту."
    )
@@ -340,6 +332,10 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_DOWNLOAD_CORE_CONTENT,
    "Завантажити вміст"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_DOWNLOAD_CORE_CONTENT,
+   "Завантажте безкоштовний контент для вибраного ядра."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_DOWNLOAD_CORE_SYSTEM_FILES,
@@ -532,14 +528,6 @@ MSG_HASH(
    "Заборонити внесення змін до встановленого ядра. Корисне для блокування оновлень, якщо вміст вимагає специфічної версії ядра для роботи (наприклад набори аркадних ROM)."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CORE_SET_STANDALONE_EXEMPT,
-   "Виключити з меню 'Автономні ядра'"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_CORE_SET_STANDALONE_EXEMPT,
-   "Заборонити цьому ядру показуватися в меню 'Автономні ядра'. Застосовується лише при установці 'Користувацькі'."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_CORE_DELETE,
    "Видалити ядро"
    )
@@ -602,13 +590,9 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_CPU_ARCHITECTURE,
    "Архітектура процесора"
    )
-MSG_HASH( /* FIXME Colon should be handled in menu_display.c like the rest */
-   MENU_ENUM_LABEL_VALUE_CPU_CORES,
-   "Ядра ЦП:"
-   )
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_CPU_CORES,
-   "Кількість ядер процесора."
+   MENU_ENUM_LABEL_VALUE_CPU_CORES,
+   "Ядра ЦП"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_IDENTIFIER,
@@ -1036,20 +1020,16 @@ MSG_HASH(
    "Завантажити налаштування"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
-   "Відновити стандартні налаштування"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_RESET_TO_DEFAULT_CONFIG,
-   "Скинути поточні налаштування до стандартних значень."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SAVE_CURRENT_CONFIG,
    "Зберегти поточні налаштування"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SAVE_NEW_CONFIG,
    "Зберегти нові налаштування"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
+   "Відновити стандартні налаштування"
    )
 
 /* Main Menu > Help */
@@ -1275,12 +1255,40 @@ MSG_HASH(
 
 /* Core option category placeholders for icons */
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_HACKS_SETTINGS,
+   "Хаки"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MAPPING_SETTINGS,
+   "Призначення кнопок"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MEDIA_SETTINGS,
    "Медіа"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_PERFORMANCE_SETTINGS,
+   "Продуктивність"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_SOUND_SETTINGS,
+   "Звук"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_SPECS_SETTINGS,
+   "Специфікації"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_STORAGE_SETTINGS,
+   "Пам'ять"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SYSTEM_SETTINGS,
    "Система"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_TIMING_SETTINGS,
+   "Таймінг"
    )
 
 #ifdef HAVE_MIST
@@ -1466,10 +1474,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_SMOOTH,
    "Білінійне фільтрування"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_VIDEO_SMOOTH,
-   "Додати легке розмиття до зображення, щоб згладити чіткі краї пікселів. Цей параметр дуже слабко впливає на продуктивність."
    )
 #if defined(DINGUX)
 MSG_HASH(
@@ -1882,6 +1886,14 @@ MSG_HASH(
    MENU_ENUM_SUBLABEL_VIDEO_ASPECT_RATIO,
    "Значення рухомої точки для відеосторін (ширина / висота)."
    )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_ASPECT_RATIO_CONFIG,
+   "Налаштування"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_ASPECT_RATIO_CUSTOM,
+   "Користувацька"
+   )
 #if defined(DINGUX)
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_DINGUX_IPU_KEEP_ASPECT,
@@ -2009,10 +2021,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY,
    "Затримка кадрів (мс)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_VIDEO_FRAME_DELAY,
-   "Зменшує затримку ціною вищого ризику заїкання відео. Додає затримку після VSync (у мс)."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_AUTO,
@@ -2201,6 +2209,10 @@ MSG_HASH(
    "Перевизначити типовий аудіо пристрій, який використовує звуковий драйвер. Це залежить від драйвера."
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_HELP_AUDIO_DEVICE,
+   "Перевизначити типовий аудіо пристрій, який використовує звуковий драйвер. Це залежить від драйвера."
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_AUDIO_LATENCY,
    "Затримка звуку (мс)"
    )
@@ -2371,14 +2383,6 @@ MSG_HASH(
    "Максимальна кількість користувачів, яких підтримує RetroArch."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_POLL_TYPE_BEHAVIOR,
-   "Поведінка опитування"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_POLL_TYPE_BEHAVIOR,
-   "Вплив на те, як здійснюється опитування вхідних даних у RetroArch. Якщо встановити значення \"Рано\" або \"Пізно\", це може призвести до меншої затримки, залежно від вашої конфігурації."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_REMAP_BINDS_ENABLE,
    "Перепризначити елементи керування для цього ядра"
    )
@@ -2403,6 +2407,8 @@ MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_NOWINKEY_ENABLE,
    "Опрацьовуювати комбанції з клавішею Win."
    )
+#endif
+#ifdef ANDROID
 #endif
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_SENSORS_ENABLE,
@@ -2439,6 +2445,10 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_AUTO_GAME_FOCUS_DETECT,
    "Виявити"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
+   "Зупинити гру при відключенні контролера"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_BUTTON_AXIS_THRESHOLD,
@@ -2552,6 +2562,22 @@ MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_USER_BINDS,
    "Змінити кнопки управління для цього порту."
    )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
+   "Обхідний шлях відключення Android"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_ANDROID_INPUT_DISCONNECT_WORKAROUND,
+   "Обхідний шлях для відключення та повторного підключення контролерів. Заважає 2 гравцям з однаковими контролерами."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_QUIT_PRESS_TWICE,
+   "Підтвердити вихід"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_QUIT_PRESS_TWICE,
+   "Для виходу з RetroArch потрібно двічі натиснути комбінацію клавіш."
+   )
 
 /* Settings > Input > Haptic Feedback/Vibration */
 
@@ -2583,12 +2609,36 @@ MSG_HASH(
    "Використовуйте одне і те ж керування для меню і гри. Застосовується до клавіатури."
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_DISABLE_INFO_BUTTON,
+   "Вимкнути кнопку «Інформація»"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_DISABLE_INFO_BUTTON,
+   "Якщо буде увімкнено, натискання кнопки \"Інформація\" буде проігноровано."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_DISABLE_SEARCH_BUTTON,
+   "Вимкнути кнопку «Пошук»"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_DISABLE_SEARCH_BUTTON,
+   "Якщо буде увімкнено, натискання кнопки \"Пошук\" буде проігноровано."
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MENU_INPUT_SWAP_OK_CANCEL,
    "Поміняти місцями кнопки ОК та Скасувати"
    )
 MSG_HASH(
    MENU_ENUM_SUBLABEL_MENU_INPUT_SWAP_OK_CANCEL,
    "Поміняти місцями кнопки ОК та Скасувати. Вимкнено — це японське розташування кнопок, увімкнено — це західне."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MENU_INPUT_SWAP_SCROLL,
+   "Поміняти кнопки прокрутки меню"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_MENU_INPUT_SWAP_SCROLL,
+   "Поміняти кнопки місцями для прокручування. Вимкнути прокручування 10 пунктів з L/R та за алфавітом L2/R2."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_ALL_USERS_CONTROL_MENU,
@@ -2599,44 +2649,39 @@ MSG_HASH(
    "Дозволяє будь-якому користувачу контролювати меню. Якщо вимкнено, тоді лише користувач 1 може керувати меню."
    )
 
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
-   "Обхідний шлях відключення Android"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_ANDROID_INPUT_DISCONNECT_WORKAROUND,
-   "Обхідний шлях для відключення та повторного підключення контролерів. Заважає 2 гравцям з однаковими контролерами."
-   )
-
 /* Settings > Input > Hotkeys */
 
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_QUIT_PRESS_TWICE,
-   "Підтвердити вихід"
+   MENU_ENUM_LABEL_VALUE_INPUT_META_ENABLE_HOTKEY,
+   "Увімкнути гарячу клавішу"
    )
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_QUIT_PRESS_TWICE,
-   "Для виходу з RetroArch потрібно двічі натиснути комбінацію клавіш."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_MENU_ENUM_TOGGLE_GAMEPAD_COMBO,
-   "Комбінація клавіш для відкривання меню"
+   MENU_ENUM_LABEL_VALUE_INPUT_HOTKEY_BLOCK_DELAY,
+   "Гаряча клавіша для вмикання затримки (кадрів)"
    )
 MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_MENU_ENUM_TOGGLE_GAMEPAD_COMBO,
    "Комбінація кнопок контролера для виходу."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_QUIT_GAMEPAD_COMBO,
-   "Комбінація кнопок для виходу"
+   MENU_ENUM_SUBLABEL_INPUT_META_MENU_TOGGLE,
+   "Перемикає поточний вигляд між меню та запущеним контентом."
    )
 MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_QUIT_GAMEPAD_COMBO,
    "Комбінація кнопок контролера для виходу з RetroArch."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_HOTKEY_BLOCK_DELAY,
-   "Гаряча клавіша для вмикання затримки (кадрів)"
+   MENU_ENUM_LABEL_VALUE_INPUT_META_QUIT_KEY,
+   "Вихід"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_QUIT_KEY,
+   "Закриває RetroArch, забезпечує збережених всіх даних та файлів налаштувань на диску."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_CLOSE_CONTENT_KEY,
+   "Закрити вміст"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_FAST_FORWARD_KEY,
@@ -2649,6 +2694,10 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_FAST_FORWARD_HOLD_KEY,
    "Перемотування (тримати)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_FAST_FORWARD_HOLD_KEY,
+   "Вмикає пришвидшення при утриманні. Вміст запускається зі звичайною швидкістю, коли відпускається клавіша."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_SLOWMOTION_KEY,
@@ -2667,128 +2716,13 @@ MSG_HASH(
    "Вмикає сповільнення при утриманні. Вміст запускається зі звичайною швидкістю, коли відпускається клавіша."
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_VRR_RUNLOOP_TOGGLE,
-   "Синхронізація з точною частотою кадрів (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_VRR_RUNLOOP_TOGGLE,
-   "Вмикає/вимикає синхронізацію з точною частотою кадрів."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_LOAD_STATE_KEY,
-   "Завантажити стан"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_LOAD_STATE_KEY,
-   "Завантажує збережений стан з обраної комірки."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_SAVE_STATE_KEY,
-   "Зберегти стан"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_SAVE_STATE_KEY,
-   "Зберегти стан у вибрану вами комірку."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_FULLSCREEN_TOGGLE_KEY,
-   "Повноекранний режим (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_FULLSCREEN_TOGGLE_KEY,
-   "Перемикає між повноекранним і віконним режимом."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_CLOSE_CONTENT_KEY,
-   "Закрити вміст"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_CLOSE_CONTENT_KEY,
-   "Закриває поточний вміст. Будь-які незбережені зміни можуть бути втрачені."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_QUIT_KEY,
-   "Вийти з RetroArch"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_QUIT_KEY,
-   "Закриває RetroArch, забезпечує збережених всіх даних та файлів налаштувань на диску."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_STATE_SLOT_PLUS,
-   "Слот збереження +"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_STATE_SLOT_PLUS,
-   "Збільшує поточний вибраний індекс слоту збереження."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_STATE_SLOT_MINUS,
-   "Слот збереження -"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_STATE_SLOT_MINUS,
-   "Зменшує поточний вибраний індекс слоту збереження."
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_REWIND,
    "Перемотати назад"
    )
+
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_REWIND_HOTKEY,
-   "Перемотує поточний вміст, поки утримується клавіша.\n'Підтримка перемотування' має бути увімкнена."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_PAUSE_TOGGLE,
-   "Пауза (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_RESET,
-   "Повернутися до початкової позиції"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_NEXT,
-   "Наступний шейдер"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_PREV,
-   "Попередній шейдер"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_CHEAT_TOGGLE,
-   "Чіти (перемкнути)"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_SCREENSHOT,
-   "Зробити знімок екрана"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_MUTE,
-   "Вимкнути звук (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_FPS_TOGGLE,
-   "Показати частоту кадрів (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_FPS_TOGGLE,
-   "Перемикає індикатор частоти кадрів (FPS)."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_SEND_DEBUG_INFO,
-   "Відправити зневаджувальну інформацію"
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_NETPLAY_HOST_TOGGLE,
-   "Хостинг мережевої гри (Перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_NETPLAY_HOST_TOGGLE,
-   "Вмикає або вимикає хостинг мережевих ігор."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_ENABLE_HOTKEY,
-   "Увімкнути гарячу клавішу"
+   MENU_ENUM_SUBLABEL_INPUT_META_MUTE,
+   "Вмикає/вимикає виведення звуку."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_VOLUME_UP,
@@ -2798,14 +2732,24 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_VOLUME_DOWN,
    "Тихіше"
    )
+
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_OVERLAY_NEXT,
-   "Наступна накладка"
+   MENU_ENUM_LABEL_VALUE_INPUT_META_LOAD_STATE_KEY,
+   "Завантажити стан"
    )
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_OVERLAY_NEXT,
-   "Перемикає на наступний доступний макет поточного екранного накладання."
+   MENU_ENUM_LABEL_VALUE_INPUT_META_SAVE_STATE_KEY,
+   "Зберегти стан"
    )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_STATE_SLOT_PLUS,
+   "Збільшує поточний вибраний індекс слоту збереження."
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_STATE_SLOT_MINUS,
+   "Зменшує поточний вибраний індекс слоту збереження."
+   )
+
 MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_META_DISK_EJECT_TOGGLE,
    "Якщо лоток віртуального диска закритий, відкриває і виймає завантажений диск. В іншому випадку, вставляє диск і закриває лоток."
@@ -2818,25 +2762,24 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_DISK_PREV,
    "Попередній диск"
    )
+
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_GRAB_MOUSE_TOGGLE,
-   "Захоплювати мишу (перемикач)"
+   MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_NEXT,
+   "Наступний шейдер"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_UI_COMPANION_TOGGLE,
-   "Меню робочого столу (Увімкнути)"
+   MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_PREV,
+   "Попередній шейдер"
    )
+
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_UI_COMPANION_TOGGLE,
-   "Відкриває супровідний інтерфейс стільниці WIMP (вікна, значки, меню, вказівник)."
+   MENU_ENUM_LABEL_VALUE_INPUT_META_CHEAT_TOGGLE,
+   "Чіти (перемкнути)"
    )
+
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_MENU_TOGGLE,
-   "Меню (перемикач)"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_META_MENU_TOGGLE,
-   "Перемикає поточний вигляд між меню та запущеним контентом."
+   MENU_ENUM_LABEL_VALUE_INPUT_META_SCREENSHOT,
+   "Зробити знімок екрана"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_RECORDING_TOGGLE,
@@ -2854,9 +2797,70 @@ MSG_HASH(
    MENU_ENUM_SUBLABEL_INPUT_META_STREAMING_TOGGLE,
    "Запуск/зупинка трансляції поточної сесії на відеоплатформу."
    )
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_GRAB_MOUSE_TOGGLE,
+   "Захоплювати мишу (перемикач)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_FULLSCREEN_TOGGLE_KEY,
+   "Повноекранний режим (перемикач)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_FULLSCREEN_TOGGLE_KEY,
+   "Перемикає між повноекранним і віконним режимом."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_UI_COMPANION_TOGGLE,
+   "Меню робочого столу (Увімкнути)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_UI_COMPANION_TOGGLE,
+   "Відкриває супровідний інтерфейс стільниці WIMP (вікна, значки, меню, вказівник)."
+   )
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_VRR_RUNLOOP_TOGGLE,
+   "Синхронізація з точною частотою кадрів (перемикач)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_VRR_RUNLOOP_TOGGLE,
+   "Вмикає/вимикає синхронізацію з точною частотою кадрів."
+   )
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_FPS_TOGGLE,
+   "Показати частоту кадрів (перемикач)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_FPS_TOGGLE,
+   "Перемикає індикатор частоти кадрів (FPS)."
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_OVERLAY_NEXT,
+   "Наступна накладка"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_OVERLAY_NEXT,
+   "Перемикає на наступний доступний макет поточного екранного накладання."
+   )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_AI_SERVICE,
    "Служба AI"
+   )
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_NETPLAY_HOST_TOGGLE,
+   "Хостинг мережевої гри (Перемикач)"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_NETPLAY_HOST_TOGGLE,
+   "Вмикає або вимикає хостинг мережевих ігор."
+   )
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_SEND_DEBUG_INFO,
+   "Відправити зневаджувальну інформацію"
    )
 
 /* Settings > Input > Port # Controls */
@@ -2870,20 +2874,12 @@ MSG_HASH(
    "Аналоговий на цифровий тип"
    )
 MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_ADC_TYPE,
-   "Призначити стік для використання замість хрестовини. Якщо ядро має вбудовану підтримку аналогового вводу, то призначення стіка буде вимкнено, допоки не зробити це примусово відповідною опцією. При примусовому призначенні ядро не буде отримувати аналогові команди вводу [...]"
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_DEVICE_INDEX,
    "Номер пристрою"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_REMAP_PORT,
    "Призначений порт"
-   )
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_REMAP_PORT,
-   "Вказує порт ядра (зазвичай номер гравця), який отримуватиме вхідні дані від порту контролера зовнішнього інтерфейсу %u."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_BIND_ALL,
@@ -2942,12 +2938,60 @@ MSG_HASH(
    "Кнопка X (вгорі)"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_L,
+   "L кнопка (Бампер)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_R,
+   "R кнопка (Бампер)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_L2,
+   "L2 кнопка (тригер)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_R2,
+   "R2 кнопка (тригер)"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_L3,
    "Кнопка L3 (кнопка)"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_JOYPAD_R3,
    "Кнопка R3 (великий палець)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_X_PLUS,
+   "Лівий аналог X+ (Правий)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_X_MINUS,
+   "Лівий аналог X+ (ліворуч)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_Y_PLUS,
+   "Лівий аналог Y+ (донизу)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_Y_MINUS,
+   "Лівий аналог Y- (догори)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_X_PLUS,
+   "Правий аналог X+ (праворуч)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_X_MINUS,
+   "Правий аналог X- (ліворуч)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_Y_PLUS,
+   "Правий аналог Y+ (донизу)"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_Y_MINUS,
+   "Правий аналог Y- (вгору)"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_LIGHTGUN_RELOAD,
@@ -3020,9 +3064,25 @@ MSG_HASH(
    )
 
 
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_CORE_STEAM_INSTALL,
+   "Встановити ядро"
+)
 
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_CORE_STEAM_UNINSTALL,
+   "Видалити ядро"
+)
 
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MENU_SHOW_CORE_MANAGER_STEAM,
+   "Показати 'Управління ядрами'"
+)
 
+MSG_HASH(
+   MSG_CORE_STEAM_INSTALLING,
+   "Встановлені ядра: "
+)
 
 
 #endif
@@ -3146,6 +3206,10 @@ MSG_HASH(
    "Якість запису"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_CUSTOM,
+   "Користувацька"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_THREADS,
    "Потоки запису"
    )
@@ -3158,8 +3222,20 @@ MSG_HASH(
    "Режим трансляції"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_LOCAL,
+   "Місцеві"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_CUSTOM,
+   "Користувацька"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_STREAM_QUALITY,
    "Якість потоку"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_STREAMING_CUSTOM,
+   "Користувацька"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_STREAMING_TITLE,
@@ -3568,6 +3644,10 @@ MSG_HASH(
    MENU_ENUM_LABEL_VALUE_THUMBNAILS,
    "Мініатюри"
    )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MENU_REMEMBER_SELECTION_ALWAYS,
+   "Завжди"
+   )
 
 /* Settings > AI Service */
 
@@ -3636,10 +3716,6 @@ MSG_HASH(
    "Розблокувати звук"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CHEEVOS_VERBOSE_ENABLE,
-   "Докладний режим"
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_CHEEVOS_AUTO_SCREENSHOT,
    "Автоматичний знімок екрану"
    )
@@ -3647,6 +3723,16 @@ MSG_HASH( /* suggestion for translators: translate as 'Play Again Mode' */
    MENU_ENUM_LABEL_VALUE_CHEEVOS_START_ACTIVE,
    "Повторне Проходження"
    )
+
+/* Settings > Achievements > Appearance */
+
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_SETTINGS,
+   "Зовнішній вигляд"
+   )
+
+/* Settings > Achievements > Visibility */
+
 
 /* Settings > Network */
 
@@ -3932,10 +4018,6 @@ MSG_HASH(
    "Інформація про ядро"
    )
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_CURSOR_DIRECTORY,
-   "Вказівник"
-   )
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_VIDEO_SHADER_DIR,
    "Відеошейдери"
    )
@@ -4163,6 +4245,38 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_EXPLORE_BY_SYSTEM_NAME,
    "За Ім'ям Системи"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_RANGE_FILTER,
+   "Встановити Фільтр Діапазону"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_VIEW,
+   "Вигляд"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_SAVE_VIEW,
+   "Зберегти як Вигляд"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_DELETE_VIEW,
+   "Видалити цей Вигляд"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_NEW_VIEW,
+   "Введіть назву нового вигляду"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_VIEW_EXISTS,
+   "Вигляд з таким ім'ям вже існує"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_VIEW_SAVED,
+   "Вигляд було збережено"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_EXPLORE_VIEW_DELETED,
+   "Вигляд було видалено"
    )
 
 /* Playlist > Playlist Item */
@@ -4654,6 +4768,10 @@ MSG_HASH(
    "Пошук"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_CYCLE_THUMBNAILS,
+   "Зациклити мініатюри"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_BASIC_MENU_CONTROLS_BACK,
    "Назад"
    )
@@ -4676,6 +4794,14 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_SELECT_FILE,
    "Обрати файл"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_ROTATION_NORMAL,
+   "Нормально"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_VIDEO_ORIENTATION_NORMAL,
+   "Нормально"
    )
 
 /* Settings Options */
@@ -4989,6 +5115,10 @@ MSG_HASH(
    "Лише сповіщення"
 )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_DONT_CARE,
+   "За замовчуванням"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_LINEAR,
    "Лінійна"
    )
@@ -5250,10 +5380,6 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_SUBLABEL_MENU_RGUI_EXTENDED_ASCII,
    "Увімкнути показ нестандартних ASCII-символів. Необхідно для сумісності з деякими західнороманськими мовами. Має посередній вплив на швидкодію."
-   )
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_MENU_RGUI_SWITCH_ICONS,
-   "Показати значки перемикачів"
    )
 MSG_HASH(
    MENU_ENUM_SUBLABEL_MENU_RGUI_SWITCH_ICONS,
@@ -5542,6 +5668,10 @@ MSG_HASH(
    "Виберіть іншу тему значків для RetroArch."
    )
 MSG_HASH(
+   MENU_ENUM_SUBLABEL_XMB_SWITCH_ICONS,
+   "Використовувати значки замість тексту УВІМК/ВИМК для відображення перемикачів у меню."
+   )
+MSG_HASH(
    MENU_ENUM_SUBLABEL_XMB_RIBBON_ENABLE,
    "Виберіть ефект анімації фону. Може впливати на продуктивність ГП залежно від ефекту. Якщо продуктивність незадовільна, вимкніть це або поверніться до більш простого ефекту."
    )
@@ -5556,6 +5686,14 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MENU_XMB_THUMBNAIL_SCALE_FACTOR,
    "Фактор масштабування мініатюр"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MENU_XMB_SHOW_TITLE_HEADER,
+   "Показувати Заголовок"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_MENU_XMB_TITLE_MARGIN_HORIZONTAL_OFFSET,
+   "Горизонтальний Відступ Поля Заголовка"
    )
 
 /* XMB: Settings Options */
@@ -5781,6 +5919,10 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MATERIALUI_ICONS_ENABLE,
    "Значки меню"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_MATERIALUI_SWITCH_ICONS,
+   "Використовувати значки замість тексту УВІМК/ВИМК для відображення перемикачів у меню."
    )
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_MATERIALUI_LANDSCAPE_LAYOUT_OPTIMIZATION,
@@ -6524,6 +6666,14 @@ MSG_HASH(
    "Пресет шейдера"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VIDEO_SHADER_PRESET_PREPEND_TWO,
+   "Пресет шейдера"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_VIDEO_SHADER_PRESET_APPEND_TWO,
+   "Пресет шейдера"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_BROWSE_URL_LIST,
    "Переглянути URL"
    )
@@ -6850,6 +7000,10 @@ MSG_HASH(
 MSG_HASH(
    MSG_PUBLIC_ADDRESS,
    "Порт для мережевої гри призначено"
+   )
+MSG_HASH(
+   MSG_PRIVATE_OR_SHARED_ADDRESS,
+   "Зовнішня мережа має приватну або спільну адресу. Розгляньте можливість використання сервера ретрансляції."
    )
 MSG_HASH(
    MSG_NETPLAY_YOU_HAVE_LEFT_THE_GAME,
@@ -7405,6 +7559,14 @@ MSG_HASH(
    "Завершення роботи..."
    )
 MSG_HASH(
+   MSG_DEVICE_CONFIGURED_IN_PORT,
+   "налаштований у порту"
+   )
+MSG_HASH(
+   MSG_DEVICE_DISCONNECTED_FROM_PORT,
+   "відключено від порту"
+   )
+MSG_HASH(
    MSG_DEVICE_NOT_CONFIGURED,
    "не налаштовано"
    )
@@ -7531,6 +7693,10 @@ MSG_HASH(
 MSG_HASH(
    MSG_BACKING_UP_CORE,
    "Резервне копіювання ядра: "
+   )
+MSG_HASH(
+   MSG_INSTALLING_CORE,
+   "Встановлені ядра: "
    )
 MSG_HASH(
    MSG_CORE_INSTALLATION_FAILED,
@@ -7801,7 +7967,7 @@ MSG_HASH(
    )
 MSG_HASH(
    MSG_3DS_BOTTOM_MENU_ASSET_NOT_FOUND,
-   "bottom_menu.png не знайдено\nв теці assets/ctr"
+   "Ресурс(и) не знайдено"
    )
 MSG_HASH(
    MSG_3DS_BOTTOM_MENU_NO_STATE_DATA,

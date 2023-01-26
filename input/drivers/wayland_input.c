@@ -401,11 +401,11 @@ bool input_wl_init(void *data, const char *joypad_name)
 static uint64_t input_wl_get_capabilities(void *data)
 {
    return
-      (1 << RETRO_DEVICE_JOYPAD)   |
-      (1 << RETRO_DEVICE_ANALOG)   |
-      (1 << RETRO_DEVICE_KEYBOARD) |
-      (1 << RETRO_DEVICE_MOUSE)    |
-      (1 << RETRO_DEVICE_LIGHTGUN);
+        (1 << RETRO_DEVICE_JOYPAD)
+      | (1 << RETRO_DEVICE_ANALOG)
+      | (1 << RETRO_DEVICE_KEYBOARD)
+      | (1 << RETRO_DEVICE_MOUSE)
+      | (1 << RETRO_DEVICE_LIGHTGUN);
 }
 
 static void input_wl_grab_mouse(void *data, bool state)
@@ -426,5 +426,6 @@ input_driver_t input_wayland = {
    input_wl_get_capabilities,
    "wayland",
    input_wl_grab_mouse,          /* grab_mouse */
+   NULL,
    NULL
 };

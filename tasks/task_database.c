@@ -37,7 +37,6 @@
 #include "../playlist.h"
 #ifdef RARCH_INTERNAL
 #include "../configuration.h"
-#include "../retroarch.h"
 #include "../ui/ui_companion_driver.h"
 #include "../gfx/video_display_server.h"
 #endif
@@ -57,6 +56,14 @@ typedef struct database_state_handle
    char serial[4096];
 } database_state_handle_t;
 
+enum db_flags_enum
+{
+   DB_HANDLE_FLAG_IS_DIRECTORY            = (1 << 0),
+   DB_HANDLE_FLAG_SCAN_STARTED            = (1 << 1),
+   DB_HANDLE_FLAG_SCAN_WITHOUT_CORE_MATCH = (1 << 2),
+   DB_HANDLE_FLAG_SHOW_HIDDEN_FILES       = (1 << 3)
+};
+
 typedef struct db_handle
 {
    char *playlist_directory;
@@ -66,10 +73,7 @@ typedef struct db_handle
    database_state_handle_t state;
    playlist_config_t playlist_config; /* size_t alignment */
    unsigned status;
-   bool is_directory;
-   bool scan_started;
-   bool scan_without_core_match;
-   bool show_hidden_files;
+   uint8_t flags;
 } db_handle_t;
 
 static const char *database_info_get_current_name(
@@ -118,7 +122,7 @@ static int task_database_iterate_start(retro_task_t *task,
       task_set_title(task, strdup(msg));
       if (db->list->size != 0)
          task_set_progress(task,
-               roundf((float)db->list_ptr / 
+               roundf((float)db->list_ptr /
                   ((float)db->list->size / 100.0f)));
 #else
       fprintf(stderr, "msg: %s\n", msg);
@@ -143,6 +147,11 @@ static int intfstream_get_serial(intfstream_t *fd, char *serial, size_t serial_l
       else if (string_is_equal(system_name, "Sony - PlayStation"))
       {
          if (detect_ps1_game(fd, serial, serial_len, filename) != 0)
+            return 1;
+      }
+      else if (string_is_equal(system_name, "Sony - PlayStation 2"))
+      {
+         if (detect_ps2_game(fd, serial, serial_len, filename) != 0)
             return 1;
       }
       else if (string_is_equal(system_name, "Nintendo - GameCube"))
@@ -242,7 +251,7 @@ static int task_database_cue_get_serial(const char *name, char* serial, size_t s
    track_path[0]                    = '\0';
 
    if (cue_find_track(name, true, &offset, &size, track_path,
-sizeof(track_path)) < 0)
+            sizeof(track_path)) < 0)
    {
 #ifdef DEBUG
       RARCH_LOG("%s\n",
@@ -505,6 +514,14 @@ static enum msg_file_type extension_to_file_type(const char *ext)
       )
       return FILE_TYPE_WBFS;
    if (
+         string_is_equal(ext_lower, "rvz")
+      )
+      return FILE_TYPE_RVZ;
+   if (
+         string_is_equal(ext_lower, "wia")
+      )
+      return FILE_TYPE_WIA;
+   if (
          string_is_equal(ext_lower, "lutro")
       )
       return FILE_TYPE_LUTRO;
@@ -550,12 +567,10 @@ static int task_database_iterate_playlist(
             return task_database_gdi_get_crc(name, &db_state->crc);
          }
          break;
-      /* Consider Wii WBFS files similar to ISO files. */
+      /* Consider WBFS, RVZ and WIA files similar to ISO files. */
       case FILE_TYPE_WBFS:
-         db_state->serial[0] = '\0';
-         intfstream_file_get_serial(name, 0, SIZE_MAX, db_state->serial, sizeof(db_state->serial));
-         db->type            =  DATABASE_TYPE_SERIAL_LOOKUP;
-         break;
+      case FILE_TYPE_RVZ:
+      case FILE_TYPE_WIA:
       case FILE_TYPE_ISO:
          db_state->serial[0] = '\0';
          intfstream_file_get_serial(name, 0, SIZE_MAX, db_state->serial, sizeof(db_state->serial));
@@ -675,6 +690,7 @@ static int database_info_list_iterate_found_match(
    char* db_playlist_base_str     = (char*)malloc(str_len);
    char* db_playlist_path         = (char*)malloc(str_len);
    char* entry_path_str           = (char*)malloc(str_len);
+   char* entry_label              = (char*)malloc(str_len);
    char *hash                     = NULL;
    playlist_t   *playlist         = NULL;
    const char         *db_path    =
@@ -711,6 +727,23 @@ static int database_info_list_iterate_found_match(
 
    if (entry_path)
       strlcpy(entry_path_str, entry_path, str_len);
+
+   /* Use database name for label if found,
+    * otherwise use filename without extension */
+   if (!string_is_empty(db_info_entry->name))
+      strlcpy(entry_label, db_info_entry->name, str_len);
+   else if (!string_is_empty(entry_path))
+   {
+      char *delim = strchr(entry_path, '#');
+
+      if (delim)
+         *delim = '\0';
+      fill_pathname(entry_label,
+            path_basename_nocompression(entry_path), "", str_len);
+      path_remove_extension(entry_label);
+
+      RARCH_LOG("[Database]: No match for: \"%s\", CRC: 0x%08X\n", entry_path_str, db_state->crc);
+   }
 
    if (!string_is_empty(archive_name))
       fill_pathname_join_delim(entry_path_str,
@@ -752,7 +785,7 @@ static int database_info_list_iterate_found_match(
       /* the push function reads our entry as const,
        * so these casts are safe */
       entry.path              = entry_path_str;
-      entry.label             = db_info_entry->name;
+      entry.label             = entry_label;
       entry.core_path         = (char*)"DETECT";
       entry.core_name         = (char*)"DETECT";
       entry.db_name           = db_playlist_base_str;
@@ -760,6 +793,7 @@ static int database_info_list_iterate_found_match(
       entry.subsystem_ident   = NULL;
       entry.subsystem_name    = NULL;
       entry.subsystem_roms    = NULL;
+      entry.entry_slot        = 0;
       entry.runtime_hours     = 0;
       entry.runtime_minutes   = 0;
       entry.runtime_seconds   = 0;
@@ -787,7 +821,7 @@ static int database_info_list_iterate_found_match(
       again */
    if (db_state->list_index != 0)
    {
-      struct string_list_elem entry = 
+      struct string_list_elem entry =
          db_state->list->elems[db_state->list_index];
       memmove(&db_state->list->elems[1],
               &db_state->list->elems[0],
@@ -799,6 +833,7 @@ static int database_info_list_iterate_found_match(
    free(db_playlist_base_str);
    free(db_playlist_path);
    free(entry_path_str);
+   free(entry_label);
    return 0;
 }
 
@@ -831,7 +866,7 @@ static int task_database_iterate_crc_lookup(
       return database_info_list_iterate_end_no_match(db, db_state, name,
             path_contains_compressed_file);
 
-   /* Archive did not contain a CRC for this entry, 
+   /* Archive did not contain a CRC for this entry,
     * or the file is empty. */
    if (!db_state->crc)
    {
@@ -847,7 +882,7 @@ static int task_database_iterate_crc_lookup(
 
       query[0] = '\0';
 
-      if (!_db->scan_without_core_match)
+      if (!(_db->flags & DB_HANDLE_FLAG_SCAN_WITHOUT_CORE_MATCH))
       {
          /* don't scan files that can't be in this database.
           *
@@ -943,7 +978,7 @@ static int task_database_iterate_playlist_lutro(
             path_basename(path), "", sizeof(game_title));
       path_remove_extension(game_title);
 
-      /* the push function reads our entry as const, 
+      /* the push function reads our entry as const,
        * so these casts are safe */
       entry.path                  = (char*)path;
       entry.label                 = game_title;
@@ -954,6 +989,7 @@ static int task_database_iterate_playlist_lutro(
       entry.subsystem_ident       = NULL;
       entry.subsystem_name        = NULL;
       entry.subsystem_roms        = NULL;
+      entry.entry_slot            = 0;
       entry.runtime_hours         = 0;
       entry.runtime_minutes       = 0;
       entry.runtime_seconds       = 0;
@@ -1105,16 +1141,16 @@ static void task_database_handler(retro_task_t *task)
    if (!db)
       goto task_finished;
 
-   if (!db->scan_started)
+   if (!(db->flags & DB_HANDLE_FLAG_SCAN_STARTED))
    {
-      db->scan_started = true;
+      db->flags       |= DB_HANDLE_FLAG_SCAN_STARTED;
 
       if (!string_is_empty(db->fullpath))
       {
-         if (db->is_directory)
+         if (db->flags & DB_HANDLE_FLAG_IS_DIRECTORY)
             db->handle = database_info_dir_init(
                   db->fullpath, DATABASE_TYPE_ITERATE,
-                  task, db->show_hidden_files);
+                  task, db->flags & DB_HANDLE_FLAG_SHOW_HIDDEN_FILES);
          else
             db->handle = database_info_file_init(
                   db->fullpath, DATABASE_TYPE_ITERATE,
@@ -1140,12 +1176,12 @@ static void task_database_handler(retro_task_t *task)
                dbstate->list        = dir_list_new(
                      db->content_database_path,
                      "rdb", false,
-                     db->show_hidden_files,
+                     db->flags & DB_HANDLE_FLAG_SHOW_HIDDEN_FILES,
                      false, false);
 
             /* If the scan path matches a database path exactly then
              * save time by only processing that database. */
-            if (dbstate->list && db->is_directory)
+            if (dbstate->list && (db->flags & DB_HANDLE_FLAG_IS_DIRECTORY))
             {
                size_t i;
                char *dirname = NULL;
@@ -1195,7 +1231,7 @@ static void task_database_handler(retro_task_t *task)
       case DATABASE_STATUS_ITERATE:
          {
             bool path_contains_compressed_file = false;
-            const char *name                   = 
+            const char *name                   =
                database_info_get_current_element_name(dbinfo);
             if (!name)
                goto task_finished;
@@ -1224,7 +1260,7 @@ static void task_database_handler(retro_task_t *task)
          else
          {
             const char *msg = NULL;
-            if (db->is_directory)
+            if (db->flags & DB_HANDLE_FLAG_IS_DIRECTORY)
                msg = msg_hash_to_str(MSG_SCANNING_OF_DIRECTORY_FINISHED);
             else
                msg = msg_hash_to_str(MSG_SCANNING_OF_FILE_FINISHED);
@@ -1311,7 +1347,8 @@ bool task_push_dbscan(
 
 #ifdef RARCH_INTERNAL
    t->progress_cb                          = task_database_progress_cb;
-   db->scan_without_core_match             = settings->bools.scan_without_core_match;
+   if (settings->bools.scan_without_core_match)
+      db->flags |= DB_HANDLE_FLAG_SCAN_WITHOUT_CORE_MATCH;
    db->playlist_config.capacity            = COLLECTION_SIZE;
    db->playlist_config.old_format          = settings->bools.playlist_use_old_format;
    db->playlist_config.compress            = settings->bools.playlist_compression;
@@ -1324,8 +1361,10 @@ bool task_push_dbscan(
    db->playlist_config.fuzzy_archive_match = false;
    playlist_config_set_base_content_directory(&db->playlist_config, NULL);
 #endif
-   db->show_hidden_files                   = db_dir_show_hidden_files;
-   db->is_directory                        = directory;
+   if (db_dir_show_hidden_files)
+      db->flags |= DB_HANDLE_FLAG_SHOW_HIDDEN_FILES;
+   if (directory)
+      db->flags |= DB_HANDLE_FLAG_IS_DIRECTORY;
    db->fullpath                            = strdup(fullpath);
    db->playlist_directory                  = strdup(playlist_directory);
    db->content_database_path               = strdup(content_database);

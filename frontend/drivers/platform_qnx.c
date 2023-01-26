@@ -29,19 +29,17 @@
 
 #include "../../defaults.h"
 #include "../../dynamic.h"
-#include "../../verbosity.h"
 #include "../../paths.h"
+#include "../../verbosity.h"
 
 static void frontend_qnx_init(void *data)
 {
-   (void)data;
    verbosity_enable();
    bps_initialize();
 }
 
 static void frontend_qnx_shutdown(bool unused)
 {
-   (void)unused;
    bps_shutdown();
 }
 
@@ -65,7 +63,7 @@ static void frontend_qnx_get_env_settings(int *argc, char *argv[],
 
    getcwd(workdir, sizeof(workdir));
 
-   if(!string_is_empty(workdir))
+   if (!string_is_empty(workdir))
    {
       assets_path[0]               = '\0';
       data_path[0]                 = '\0';
@@ -95,8 +93,6 @@ static void frontend_qnx_get_env_settings(int *argc, char *argv[],
          "assets", sizeof(g_defaults.dirs[DEFAULT_DIR_ASSETS]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG], data_path,
          "autoconfig", sizeof(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG]));
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], data_path,
-         "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], data_path,
          "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE_INFO], data_path,
@@ -121,7 +117,7 @@ static void frontend_qnx_get_env_settings(int *argc, char *argv[],
          "filters/audio", sizeof(g_defaults.dirs[DEFAULT_DIR_AUDIO_FILTER]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_PLAYLIST], user_path,
          "playlists", sizeof(g_defaults.dirs[DEFAULT_DIR_PLAYLIST]));
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP], user_path,
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP], g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG],
          "remaps", sizeof(g_defaults.dirs[DEFAULT_DIR_REMAP]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SRAM], user_path,
          "saves", sizeof(g_defaults.dirs[DEFAULT_DIR_SRAM]));
@@ -158,7 +154,7 @@ static void frontend_qnx_get_env_settings(int *argc, char *argv[],
             sizeof(copy_command),
             "cp -r %s/. %s", assets_path, data_path);
 
-      if(system(copy_command) == -1)
+      if (system(copy_command) == -1)
          RARCH_ERR("Asset copy failed: Shell could not be run.\n" );
       else
          RARCH_LOG( "Asset copy successful.\n");

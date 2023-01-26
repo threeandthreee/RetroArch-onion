@@ -1,7 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2017 - Jean-André Santoni
+ *  Copyright (C) 2017      - Jean-André Santoni
  *  Copyright (C) 2017-2019 - Andrés Suárez
- *  Copyright (C) 2021-2022 - Roberto V. Rampim
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -865,7 +864,7 @@ bool task_push_netplay_content_reload(const char *hostname)
    struct netplay_crc_scan_data *data;
    retro_task_t *task;
    const char *pcore;
-   bool contentless, is_inited;
+   uint8_t flags;
 
    /* Do not run more than one CRC scan task at a time. */
    if (scan_state.running)
@@ -875,8 +874,8 @@ bool task_push_netplay_content_reload(const char *hostname)
    if (string_is_empty(pcore) || string_is_equal(pcore, "builtin"))
       return false; /* Nothing to reload. */
 
-   data = (struct netplay_crc_scan_data*)calloc(1, sizeof(*data));
-   task = task_init();
+   data  = (struct netplay_crc_scan_data*)calloc(1, sizeof(*data));
+   task  = task_init();
 
    if (!data || !task)
    {
@@ -894,12 +893,10 @@ bool task_push_netplay_content_reload(const char *hostname)
    if (hostname)
       strlcpy(data->hostname, hostname, sizeof(data->hostname));
 
-   content_get_status(&contentless, &is_inited);
-   if (contentless)
-   {
+   flags = content_get_flags();
+   if (flags & CONTENT_ST_FLAG_CORE_DOES_NOT_NEED_CONTENT)
       scan_state.state |= STATE_LOAD_CONTENTLESS;
-   }
-   else if (is_inited)
+   else if (flags & CONTENT_ST_FLAG_IS_INITED)
    {
       const char *psubsystem = path_get(RARCH_PATH_SUBSYSTEM);
 

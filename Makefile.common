@@ -239,7 +239,6 @@ endif
 OBJ += frontend/frontend_driver.o \
        retroarch.o \
        runloop.o \
-       driver.o \
        ui/ui_companion_driver.o \
        camera/camera_driver.o \
        record/record_driver.o \
@@ -258,6 +257,7 @@ endif
 
 OBJ += \
        tasks/task_save.o \
+       tasks/task_movie.o \
        tasks/task_file_transfer.o \
        tasks/task_image.o \
        tasks/task_playlist_manager.o \
@@ -431,6 +431,7 @@ endif
 
 ifeq ($(HAVE_RUNAHEAD), 1)
    DEFINES += -DHAVE_RUNAHEAD
+   OBJ     += runahead.o
 endif
 
 ifeq ($(HAVE_CC_RESAMPLER), 1)
@@ -474,7 +475,9 @@ ifeq ($(HAVE_LANGEXTRA), 1)
           intl/msg_hash_uk.o \
           intl/msg_hash_cs.o \
           intl/msg_hash_val.o \
-          intl/msg_hash_ca.o
+          intl/msg_hash_ca.o \
+          intl/msg_hash_en.o \
+          intl/msg_hash_hu.o
 endif
 
 ifneq ($(HAVE_GETOPT_LONG), 1)
@@ -1381,6 +1384,8 @@ ifeq ($(HAVE_HID), 1)
           input/connect/connect_nesusb.o \
           input/connect/connect_snesusb.o \
           input/connect/connect_wiiupro.o \
+		  input/connect/connect_kade.o \
+		  input/connect/connect_zerodelay_dragonrise.o \
           input/connect/connect_wiiugca.o
 endif
 
@@ -1581,7 +1586,6 @@ ifeq ($(HAVE_METAL), 1)
    DEF_FLAGS += -fobjc-arc
    OBJ += \
 	  gfx/common/metal/metal_renderer.o \
-	  gfx/common/metal_common.o \
 	  gfx/drivers/metal.o \
 	  gfx/drivers_font/metal_raster_font.o \
 	  gfx/drivers_display/gfx_display_metal.o

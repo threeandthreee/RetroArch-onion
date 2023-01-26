@@ -36,6 +36,19 @@
 #include "../config.h"
 #endif
 
+#include "menu_input_bind_dialog.h"
+#include "menu_setting.h"
+#include "menu_cbs.h"
+#include "menu_driver.h"
+#include "menu_input.h"
+#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
+#include "menu_shader.h"
+#endif
+
+#if defined(HAVE_STEAM) && defined(HAVE_MIST)
+#include <mist.h>
+#endif
+
 #ifdef HAVE_CDROM
 #include <vfs/vfs_implementation_cdrom.h>
 #endif
@@ -49,6 +62,7 @@
 
 #ifdef HAVE_CHEEVOS
 #include "../cheevos/cheevos.h"
+#include "../cheevos/cheevos_locals.h"
 #endif
 
 #ifdef HAVE_TRANSLATE
@@ -57,19 +71,10 @@
 
 #include "../frontend/frontend_driver.h"
 
-#include "menu_input_bind_dialog.h"
-
-#include "menu_setting.h"
-#include "menu_cbs.h"
-#include "menu_driver.h"
 #include "../camera/camera_driver.h"
 #include "../gfx/gfx_animation.h"
 #ifdef HAVE_GFX_WIDGETS
 #include "../gfx/gfx_widgets.h"
-#endif
-#include "menu_input.h"
-#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
-#include "menu_shader.h"
 #endif
 
 #include "../core.h"
@@ -132,6 +137,10 @@
 
 #if defined(ANDROID)
 #include "../play_feature_delivery/play_feature_delivery.h"
+#endif
+
+#ifdef HAVE_LANGEXTRA
+#include "../intl/progress.h"
 #endif
 
 #define _3_SECONDS  3000000
@@ -297,6 +306,8 @@ enum settings_list_type
    SETTINGS_LIST_MENU_SOUNDS,
    SETTINGS_LIST_PLAYLIST,
    SETTINGS_LIST_CHEEVOS,
+   SETTINGS_LIST_CHEEVOS_APPEARANCE,
+   SETTINGS_LIST_CHEEVOS_VISIBILITY,
    SETTINGS_LIST_CORE_UPDATER,
    SETTINGS_LIST_NETPLAY,
    SETTINGS_LIST_LAKKA_SERVICES,
@@ -619,7 +630,7 @@ static int setting_bind_action_ok(
 static int setting_int_action_right_default(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   double               max = 0.0f;
+   float max = 0.0f;
 
    if (!setting)
       return -1;
@@ -631,12 +642,12 @@ static int setting_int_action_right_default(
    *setting->value.target.integer =
       *setting->value.target.integer + setting->step;
 
-   if (setting->enforce_maxrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MAXRANGE)
    {
       if (*setting->value.target.integer > max)
       {
          settings_t *settings = config_get_ptr();
-         double          min  = setting->min;
+         float          min   = setting->min;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.integer = min;
@@ -782,9 +793,9 @@ int setting_uint_action_left_default(
       *setting->value.target.unsigned_integer =
          *setting->value.target.unsigned_integer - step;
 
-   if (setting->enforce_minrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MINRANGE)
    {
-      double min = setting->min;
+      float min = setting->min;
       if (overflowed || *setting->value.target.unsigned_integer < min)
       {
          settings_t *settings = config_get_ptr();
@@ -792,7 +803,7 @@ int setting_uint_action_left_default(
          if (settings && 
              settings->bools.menu_navigation_wraparound_enable)
          {
-            double max = setting->max;
+            float max = setting->max;
             *setting->value.target.unsigned_integer = max;
          }
          else
@@ -817,13 +828,13 @@ int setting_uint_action_right_default(
    *setting->value.target.unsigned_integer =
       *setting->value.target.unsigned_integer + step;
 
-   if (setting->enforce_maxrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MAXRANGE)
    {
-      double max = setting->max;
+      float max = setting->max;
       if (*setting->value.target.unsigned_integer > max)
       {
          settings_t *settings = config_get_ptr();
-         double           min = setting->min;
+         float           min  = setting->min;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.unsigned_integer = min;
@@ -903,13 +914,13 @@ static int setting_size_action_left_default(
    if (!(overflowed = step > *setting->value.target.sizet))
       *setting->value.target.sizet = *setting->value.target.sizet - step;
 
-   if (setting->enforce_minrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MINRANGE)
    {
-      double min = setting->min;
+      float min = setting->min;
       if (overflowed || *setting->value.target.sizet < min)
       {
          settings_t *settings = config_get_ptr();
-         double           max = setting->max;
+         float           max  = setting->max;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.sizet = max;
@@ -934,13 +945,13 @@ static int setting_size_action_right_default(
    *setting->value.target.sizet =
       *setting->value.target.sizet + step;
 
-   if (setting->enforce_maxrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MAXRANGE)
    {
-      double max = setting->max;
+      float max = setting->max;
       if (*setting->value.target.sizet > max)
       {
          settings_t *settings = config_get_ptr();
-         double           min = setting->min;
+         float           min  = setting->min;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.sizet = min;
@@ -959,7 +970,7 @@ int setting_generic_action_ok_default(
       return -1;
 
    if (setting->cmd_trigger_idx != CMD_EVENT_NONE)
-      setting->cmd_trigger_event_triggered = true;
+      setting->flags |= SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED;
 
    return 0;
 }
@@ -972,7 +983,8 @@ void setting_generic_handle_change(rarch_setting_t *setting)
    if (setting->change_handler)
       setting->change_handler(setting);
 
-   if (setting->cmd_trigger_idx && !setting->cmd_trigger_event_triggered)
+   if (       setting->cmd_trigger_idx 
+         && !(setting->flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED))
       command_event(setting->cmd_trigger_idx, NULL);
 }
 
@@ -1013,8 +1025,8 @@ int setting_set_with_string_representation(rarch_setting_t* setting,
       const char* value)
 {
    char *ptr;
-   double min, max;
-   uint64_t flags;
+   float min, max;
+   uint32_t flags;
    if (!setting || !value)
       return -1;
 
@@ -1028,9 +1040,9 @@ int setting_set_with_string_representation(rarch_setting_t* setting,
          *setting->value.target.integer = (int)strtol(value, &ptr, 10);
          if (flags & SD_FLAG_HAS_RANGE)
          {
-            if (setting->enforce_minrange && *setting->value.target.integer < min)
+            if (flags & SD_FLAG_ENFORCE_MINRANGE && *setting->value.target.integer < min)
                *setting->value.target.integer = min;
-            if (setting->enforce_maxrange && *setting->value.target.integer > max)
+            if (flags & SD_FLAG_ENFORCE_MAXRANGE && *setting->value.target.integer > max)
             {
                settings_t *settings = config_get_ptr();
                if (settings && settings->bools.menu_navigation_wraparound_enable)
@@ -1044,9 +1056,9 @@ int setting_set_with_string_representation(rarch_setting_t* setting,
          *setting->value.target.unsigned_integer = (unsigned int)strtoul(value, &ptr, 10);
          if (flags & SD_FLAG_HAS_RANGE)
          {
-            if (setting->enforce_minrange && *setting->value.target.unsigned_integer < min)
+            if (flags & SD_FLAG_ENFORCE_MINRANGE && *setting->value.target.unsigned_integer < min)
                *setting->value.target.unsigned_integer = min;
-            if (setting->enforce_maxrange && *setting->value.target.unsigned_integer > max)
+            if (flags & SD_FLAG_ENFORCE_MAXRANGE && *setting->value.target.unsigned_integer > max)
             {
                settings_t *settings = config_get_ptr();
                if (settings && settings->bools.menu_navigation_wraparound_enable)
@@ -1060,9 +1072,9 @@ int setting_set_with_string_representation(rarch_setting_t* setting,
          sscanf(value, "%" PRI_SIZET, setting->value.target.sizet);
          if (flags & SD_FLAG_HAS_RANGE)
          {
-            if (setting->enforce_minrange && *setting->value.target.sizet < min)
+            if (flags & SD_FLAG_ENFORCE_MINRANGE && *setting->value.target.sizet < min)
                *setting->value.target.sizet = min;
-            if (setting->enforce_maxrange && *setting->value.target.sizet > max)
+            if (flags & SD_FLAG_ENFORCE_MAXRANGE && *setting->value.target.sizet > max)
             {
                settings_t *settings = config_get_ptr();
                if (settings && settings->bools.menu_navigation_wraparound_enable)
@@ -1077,9 +1089,9 @@ int setting_set_with_string_representation(rarch_setting_t* setting,
          *setting->value.target.fraction = (float)strtod(value, &ptr);
          if (flags & SD_FLAG_HAS_RANGE)
          {
-            if (setting->enforce_minrange && *setting->value.target.fraction < min)
+            if (flags & SD_FLAG_ENFORCE_MINRANGE && *setting->value.target.fraction < min)
                *setting->value.target.fraction = min;
-            if (setting->enforce_maxrange && *setting->value.target.fraction > max)
+            if (flags & SD_FLAG_ENFORCE_MAXRANGE && *setting->value.target.fraction > max)
             {
                settings_t *settings = config_get_ptr();
                if (settings && settings->bools.menu_navigation_wraparound_enable)
@@ -1122,13 +1134,13 @@ static int setting_fraction_action_left_default(
    *setting->value.target.fraction = 
       *setting->value.target.fraction - setting->step;
 
-   if (setting->enforce_minrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MINRANGE)
    {
-      double min = setting->min;
+      float min = setting->min;
       if (*setting->value.target.fraction < min)
       {
          settings_t *settings = config_get_ptr();
-         double           max = setting->max;
+         float           max  = setting->max;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.fraction = max;
@@ -1149,13 +1161,13 @@ static int setting_fraction_action_right_default(
    *setting->value.target.fraction =
       *setting->value.target.fraction + setting->step;
 
-   if (setting->enforce_maxrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MAXRANGE)
    {
-      double max = setting->max;
+      float max = setting->max;
       if (*setting->value.target.fraction > max)
       {
          settings_t *settings = config_get_ptr();
-         double          min  = setting->min;
+         float          min   = setting->min;
 
          if (settings && settings->bools.menu_navigation_wraparound_enable)
             *setting->value.target.fraction = min;
@@ -1389,13 +1401,11 @@ static rarch_setting_t setting_action_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1453,13 +1463,8 @@ static rarch_setting_t setting_group_setting(
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
-
-   result.dont_use_enum_idx_representation = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
    return result;
 }
@@ -1527,17 +1532,15 @@ static rarch_setting_t setting_float_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = rounding;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.fraction     = target;
    result.original_value.fraction   = *target;
    result.default_value.fraction    = default_value;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1604,17 +1607,15 @@ static rarch_setting_t setting_uint_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.unsigned_integer   = target;
    result.original_value.unsigned_integer = *target;
    result.default_value.unsigned_integer  = default_value;
 
    result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1683,17 +1684,15 @@ static rarch_setting_t setting_size_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
-   result.value.target.sizet   = target;
-   result.original_value.sizet = *target;
-   result.default_value.sizet  = default_value;
+   result.value.target.sizet        = target;
+   result.original_value.sizet      = *target;
+   result.default_value.sizet       = default_value;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1761,17 +1760,15 @@ static rarch_setting_t setting_hex_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.unsigned_integer   = target;
    result.original_value.unsigned_integer = *target;
    result.default_value.unsigned_integer  = default_value;
 
    result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1840,16 +1837,14 @@ static rarch_setting_t setting_bind_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.keybind      = target;
    result.default_value.keybind     = default_value;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -1862,13 +1857,13 @@ static int setting_int_action_left_default(
 
    *setting->value.target.integer = *setting->value.target.integer - setting->step;
 
-   if (setting->enforce_minrange)
+   if (setting->flags & SD_FLAG_ENFORCE_MINRANGE)
    {
-      double min = setting->min;
+      float min = setting->min;
       if (*setting->value.target.integer < min)
       {
          settings_t *settings = config_get_ptr();
-         double           max = setting->max;
+         float           max  = setting->max;
 
          if (   settings
              && settings->bools.menu_navigation_wraparound_enable)
@@ -1882,20 +1877,6 @@ static int setting_int_action_left_default(
 }
 
 static int setting_bool_action_ok_default(
-      rarch_setting_t *setting, size_t idx, bool wraparound)
-{
-   if (!setting)
-      return -1;
-
-   setting_set_with_string_representation(setting,
-          *setting->value.target.boolean 
-         ? "false" 
-         : "true");
-
-   return 0;
-}
-
-static int setting_bool_action_toggle_default(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
    if (!setting)
@@ -1985,15 +1966,12 @@ static rarch_setting_t setting_string_setting(enum setting_type type,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.dir.empty_path            = empty;
    result.value.target.string       = target;
    result.default_value.string      = default_value;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
    switch (type)
    {
@@ -2011,7 +1989,8 @@ static rarch_setting_t setting_string_setting(enum setting_type type,
          break;
    }
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -2109,13 +2088,11 @@ static rarch_setting_t setting_subgroup_setting(enum setting_type type,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -2171,8 +2148,8 @@ static rarch_setting_t setting_bool_setting(const char* name,
    result.change_handler            = change_handler;
    result.read_handler              = read_handler;
    result.action_start              = setting_generic_action_start_default;
-   result.action_left               = setting_bool_action_toggle_default;
-   result.action_right              = setting_bool_action_toggle_default;
+   result.action_left               = setting_bool_action_ok_default;
+   result.action_right              = setting_bool_action_ok_default;
    result.action_up                 = NULL;
    result.action_down               = NULL;
    result.action_cancel             = NULL;
@@ -2184,8 +2161,6 @@ static rarch_setting_t setting_bool_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.boolean      = target;
    result.original_value.boolean    = *target;
@@ -2193,10 +2168,10 @@ static rarch_setting_t setting_bool_setting(const char* name,
    result.boolean.off_label         = off;
    result.boolean.on_label          = on;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -2263,17 +2238,15 @@ static rarch_setting_t setting_int_setting(const char* name,
    result.browser_selection_type    = ST_NONE;
    result.step                      = 0.0f;
    result.rounding_fraction         = NULL;
-   result.enforce_minrange          = false;
-   result.enforce_maxrange          = false;
 
    result.value.target.integer      = target;
    result.original_value.integer    = *target;
    result.default_value.integer     = default_value;
 
-   result.cmd_trigger_idx                  = CMD_EVENT_NONE;
-   result.cmd_trigger_event_triggered      = false;
+   result.cmd_trigger_idx           = CMD_EVENT_NONE;
 
-   result.dont_use_enum_idx_representation = dont_use_enum_idx;
+   if (dont_use_enum_idx)
+      result.flags |= SD_FLAG_DONT_USE_ENUM_IDX_REPRESENTATION;
 
    return result;
 }
@@ -2917,21 +2890,23 @@ static int setting_action_ok_libretro_device_type(
    return 0;
 }
 
-static int setting_action_ok_bind_device(
-      rarch_setting_t *setting, size_t idx, bool wraparound)
+#ifdef ANDROID
+static int setting_action_ok_select_physical_keyboard(
+        rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   char enum_idx[16];
-   if (!setting)
-      return -1;
+    char enum_idx[16];
+    if (!setting)
+        return -1;
 
-   snprintf(enum_idx, sizeof(enum_idx), "%d", setting->enum_idx);
+    snprintf(enum_idx, sizeof(enum_idx), "%d", setting->enum_idx);
 
-   generic_action_ok_displaylist_push(
-         enum_idx, /* we will pass the enumeration index of the string as a path */
-         NULL, NULL, 0, idx, 0,
-         ACTION_OK_DL_DROPDOWN_BOX_LIST_INPUT_DEVICE_INDEX);
-   return 0;
+    generic_action_ok_displaylist_push(
+            enum_idx, /* we will pass the enumeration index of the string as a path */
+            NULL, NULL, 0, idx, 0,
+            ACTION_OK_DL_DROPDOWN_BOX_LIST_INPUT_SELECT_PHYSICAL_KEYBOARD);
+    return 0;
 }
+#endif
 
 static int setting_string_action_left_string_options(
    rarch_setting_t* setting, size_t idx, bool wraparound)
@@ -3016,23 +2991,27 @@ static void setting_get_string_representation_streaming_mode(
    if (!setting)
       return;
 
-   /* TODO/FIXME - localize this */
    switch (*setting->value.target.unsigned_integer)
    {
       case STREAMING_MODE_TWITCH:
-         strlcpy(s, "Twitch", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_TWITCH), len);
          break;
       case STREAMING_MODE_YOUTUBE:
-         strlcpy(s, "YouTube", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_YOUTUBE), len);
          break;
       case STREAMING_MODE_FACEBOOK:
-         strlcpy(s, "Facebook Gaming", len);
-         break;         
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_FACEBOOK), len);
+         break;
       case STREAMING_MODE_LOCAL:
-         strlcpy(s, "Local", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_LOCAL), len);
          break;
       case STREAMING_MODE_CUSTOM:
-         strlcpy(s, "Custom", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_STREAMING_MODE_CUSTOM), len);
          break;
    }
 }
@@ -3044,20 +3023,23 @@ static void setting_get_string_representation_video_stream_quality(
    if (!setting)
       return;
 
-   /* TODO/FIXME - localize this */
    switch (*setting->value.target.unsigned_integer)
    {
       case RECORD_CONFIG_TYPE_STREAMING_CUSTOM:
-         strlcpy(s, "Custom", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_STREAMING_CUSTOM), len);
          break;
       case RECORD_CONFIG_TYPE_STREAMING_LOW_QUALITY:
-         strlcpy(s, "Low", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_STREAMING_LOW_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_STREAMING_MED_QUALITY:
-         strlcpy(s, "Medium", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_STREAMING_MED_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_STREAMING_HIGH_QUALITY:
-         strlcpy(s, "High", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_STREAMING_HIGH_QUALITY), len);
          break;
    }
 }
@@ -3068,35 +3050,43 @@ static void setting_get_string_representation_video_record_quality(rarch_setting
    if (!setting)
       return;
 
-   /* TODO/FIXME - localize this */
    switch (*setting->value.target.unsigned_integer)
    {
       case RECORD_CONFIG_TYPE_RECORDING_CUSTOM:
-         strlcpy(s, "Custom", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_CUSTOM), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_LOW_QUALITY:
-         strlcpy(s, "Low", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_LOW_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_MED_QUALITY:
-         strlcpy(s, "Medium", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_MED_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_HIGH_QUALITY:
-         strlcpy(s, "High", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_HIGH_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_LOSSLESS_QUALITY:
-         strlcpy(s, "Lossless", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_LOSSLESS_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_WEBM_FAST:
-         strlcpy(s, "WebM Fast", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_WEBM_FAST), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_WEBM_HIGH_QUALITY:
-         strlcpy(s, "WebM High Quality", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_WEBM_HIGH_QUALITY), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_GIF:
-         strlcpy(s, "GIF", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_GIF), len);
          break;
       case RECORD_CONFIG_TYPE_RECORDING_APNG:
-         strlcpy(s, "APNG", len);
+         strlcpy(s, msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_VIDEO_RECORD_CONFIG_TYPE_RECORDING_APNG), len);
          break;
    }
 }
@@ -5721,44 +5711,41 @@ static int setting_uint_action_left_crt_switch_resolution_super(
    return 0;
 }
 
-static int setting_action_left_bind_device(
+static int setting_action_left_input_device_index(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   unsigned               *p = NULL;
-   unsigned index_offset     = 0;
-   unsigned max_devices      = input_config_get_device_count();
    settings_t      *settings = config_get_ptr();
+   unsigned *p               = NULL;
 
-   if (!setting || max_devices == 0)
+   if (!setting || !settings)
       return -1;
 
-   index_offset = setting->index_offset;
+   p = &settings->uints.input_joypad_index[setting->index_offset];
 
-   p = &settings->uints.input_joypad_index[index_offset];
-
-   if ((*p) >= max_devices)
-      *p = max_devices - 1;
-   else if ((*p) > 0)
+   if (*p)
       (*p)--;
+   else
+      *p = MAX_INPUT_DEVICES - 1;
 
+   settings->modified = true;
    return 0;
 }
 
-static int setting_action_left_mouse_index(
+static int setting_action_left_input_mouse_index(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   unsigned index_offset    = 0;
-   settings_t *settings     = config_get_ptr();
+   settings_t      *settings = config_get_ptr();
+   unsigned *p               = NULL;
 
-   if (!setting)
+   if (!setting || !settings)
       return -1;
 
-   index_offset             = setting->index_offset;
+   p = &settings->uints.input_mouse_index[setting->index_offset];
 
-   if (settings->uints.input_mouse_index[index_offset])
-      --settings->uints.input_mouse_index[index_offset];
+   if (*p)
+      (*p)--;
    else
-      settings->uints.input_mouse_index[index_offset] = MAX_USERS - 1;
+      *p = MAX_INPUT_DEVICES - 1;
 
    settings->modified = true;
    return 0;
@@ -6409,23 +6396,42 @@ static void setting_get_string_representation_video_frame_delay(rarch_setting_t 
       char *s, size_t len)
 {
    settings_t *settings           = config_get_ptr();
-   video_driver_state_t *video_st = video_state_get_ptr();
 
    if (!setting)
       return;
 
    if (settings && settings->bools.video_frame_delay_auto)
    {
+      video_driver_state_t *video_st = video_state_get_ptr();
+      struct menu_state *menu_st     = menu_state_get_ptr();
+      file_list_t *menu_stack        = MENU_LIST_GET(menu_st->entries.list, 0);
+      const char *label              = NULL;
+
+      if (menu_stack && menu_stack->size)
+         label = menu_stack->list[menu_stack->size - 1].label;
+
       if (*setting->value.target.unsigned_integer == 0)
-         snprintf(s, len, "%s (%u %s)",
-               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_AUTOMATIC),
-               video_st->frame_delay_effective,
-               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_EFFECTIVE));
+      {
+         if (string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_DROPDOWN_BOX_LIST)))
+            snprintf(s, len, "%s",
+                  msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_AUTOMATIC));
+         else
+            snprintf(s, len, "%s (%u %s)",
+                  msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_AUTOMATIC),
+                  video_st->frame_delay_effective,
+                  msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_EFFECTIVE));
+      }
       else
-         snprintf(s, len, "%u (%u %s)",
-               *setting->value.target.unsigned_integer,
-               video_st->frame_delay_effective,
-               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_EFFECTIVE));
+      {
+         if (string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_DROPDOWN_BOX_LIST)))
+            snprintf(s, len, "%u",
+                  *setting->value.target.unsigned_integer);
+         else
+            snprintf(s, len, "%u (%u %s)",
+                  *setting->value.target.unsigned_integer,
+                  video_st->frame_delay_effective,
+                  msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_FRAME_DELAY_EFFECTIVE));
+      }
    }
    else
       snprintf(s, len, "%u", *setting->value.target.unsigned_integer);
@@ -6436,16 +6442,25 @@ static void setting_get_string_representation_uint_video_rotation(rarch_setting_
 {
    if (setting)
    {
-      char rotation_lut[4][32] =
+      switch (*setting->value.target.unsigned_integer)
       {
-         "Normal",
-         "90 deg",
-         "180 deg",
-         "270 deg"
-      };
-
-      strlcpy(s, rotation_lut[*setting->value.target.unsigned_integer],
-            len);
+         case VIDEO_ROTATION_NORMAL:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ROTATION_NORMAL),
+                  len);
+            break;
+         case VIDEO_ROTATION_90_DEG:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ROTATION_90_DEG),
+                  len);
+            break;
+         case VIDEO_ROTATION_180_DEG:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ROTATION_180_DEG),
+                  len);
+            break;
+         case VIDEO_ROTATION_270_DEG:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ROTATION_270_DEG),
+                  len);
+            break;
+      }
    }
 }
 
@@ -6454,16 +6469,25 @@ static void setting_get_string_representation_uint_screen_orientation(rarch_sett
 {
    if (setting)
    {
-      char rotation_lut[4][32] =
+      switch (*setting->value.target.unsigned_integer)
       {
-         "Normal",
-         "90 deg",
-         "180 deg",
-         "270 deg"
-      };
-
-      strlcpy(s, rotation_lut[*setting->value.target.unsigned_integer],
-            len);
+         case ORIENTATION_NORMAL:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ORIENTATION_NORMAL),
+                  len);
+            break;
+         case ORIENTATION_VERTICAL:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ORIENTATION_VERTICAL),
+                  len);
+            break;
+         case ORIENTATION_FLIPPED:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ORIENTATION_FLIPPED),
+                  len);
+            break;
+         case ORIENTATION_FLIPPED_ROTATED:
+            strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_VIDEO_ORIENTATION_FLIPPED_ROTATED),
+                  len);
+            break;
+      }
    }
 }
 
@@ -6753,13 +6777,13 @@ static void setting_get_string_representation_turbo_mode(
    switch (*setting->value.target.unsigned_integer)
    {
       case INPUT_TURBO_MODE_CLASSIC:
-         strlcpy(s, "Classic", len);
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_TURBO_MODE_CLASSIC), len);
          break;
       case INPUT_TURBO_MODE_SINGLEBUTTON:
-         strlcpy(s, "Single Button (Toggle)", len);
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_TURBO_MODE_SINGLEBUTTON), len);
          break;
       case INPUT_TURBO_MODE_SINGLEBUTTON_HOLD:
-         strlcpy(s, "Single Button (Hold)", len);
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_TURBO_MODE_SINGLEBUTTON_HOLD), len);
          break;
    }
 }
@@ -6841,44 +6865,97 @@ static void setting_get_string_representation_input_touch_scale(rarch_setting_t 
       snprintf(s, len, "x%d", *setting->value.target.unsigned_integer);
 }
 
+#ifdef ANDROID
+static void setting_get_string_representation_android_physical_keyboard(
+        rarch_setting_t *setting,
+        char *s, size_t len)
+{
+    if (!setting)
+        return;
+
+    settings_t *settings = config_get_ptr();
+
+    int keyboard_vendor_id;
+    int keyboard_product_id;
+
+    if (sscanf(setting->value.target.string, "%04x:%04x ", &keyboard_vendor_id, &keyboard_product_id) != 2)
+        strlcpy(s, setting->value.target.string, len);
+    else
+        strlcpy(s, &setting->value.target.string[10], len);
+}
+#endif
+
 #ifdef HAVE_LANGEXTRA
 static void setting_get_string_representation_uint_user_language(
       rarch_setting_t *setting,
       char *s, size_t len)
 {
    const char *modes[RETRO_LANGUAGE_LAST];
+   uint32_t translated[RETRO_LANGUAGE_LAST];
+   const char *rating;
+
+#define LANG_DATA(STR) \
+   modes[RETRO_LANGUAGE_##STR]      = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_##STR); \
+   translated[RETRO_LANGUAGE_##STR] = LANGUAGE_PROGRESS_##STR##_TRANSLATED; \
 
    modes[RETRO_LANGUAGE_ENGLISH]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_ENGLISH);
-   modes[RETRO_LANGUAGE_JAPANESE]               = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_JAPANESE);
-   modes[RETRO_LANGUAGE_FRENCH]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_FRENCH);
-   modes[RETRO_LANGUAGE_SPANISH]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_SPANISH);
-   modes[RETRO_LANGUAGE_GERMAN]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_GERMAN);
-   modes[RETRO_LANGUAGE_ITALIAN]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_ITALIAN);
-   modes[RETRO_LANGUAGE_DUTCH]                  = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_DUTCH);
+
+   LANG_DATA(JAPANESE)
+   LANG_DATA(FRENCH)
+   LANG_DATA(SPANISH)
+   LANG_DATA(GERMAN)
+   LANG_DATA(ITALIAN)
+   LANG_DATA(DUTCH)
+
    modes[RETRO_LANGUAGE_PORTUGUESE_BRAZIL]      = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_PORTUGUESE_BRAZIL);
+   translated[RETRO_LANGUAGE_PORTUGUESE_BRAZIL] = LANGUAGE_PROGRESS_PORTUGUESE_BRAZILIAN_TRANSLATED;
    modes[RETRO_LANGUAGE_PORTUGUESE_PORTUGAL]    = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_PORTUGUESE_PORTUGAL);
-   modes[RETRO_LANGUAGE_RUSSIAN]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_RUSSIAN);
-   modes[RETRO_LANGUAGE_KOREAN]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_KOREAN);
-   modes[RETRO_LANGUAGE_CHINESE_TRADITIONAL]    = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CHINESE_TRADITIONAL);
-   modes[RETRO_LANGUAGE_CHINESE_SIMPLIFIED]     = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CHINESE_SIMPLIFIED);
-   modes[RETRO_LANGUAGE_ESPERANTO]              = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_ESPERANTO);
-   modes[RETRO_LANGUAGE_POLISH]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_POLISH);
-   modes[RETRO_LANGUAGE_VIETNAMESE]             = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_VIETNAMESE);
-   modes[RETRO_LANGUAGE_ARABIC]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_ARABIC);
-   modes[RETRO_LANGUAGE_GREEK]                  = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_GREEK);
-   modes[RETRO_LANGUAGE_TURKISH]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_TURKISH);
-   modes[RETRO_LANGUAGE_SLOVAK]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_SLOVAK);
-   modes[RETRO_LANGUAGE_PERSIAN]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_PERSIAN);
-   modes[RETRO_LANGUAGE_HEBREW]                 = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_HEBREW);
-   modes[RETRO_LANGUAGE_ASTURIAN]               = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_ASTURIAN);
-   modes[RETRO_LANGUAGE_FINNISH]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_FINNISH);
-   modes[RETRO_LANGUAGE_INDONESIAN]             = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_INDONESIAN);
-   modes[RETRO_LANGUAGE_SWEDISH]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_SWEDISH);
-   modes[RETRO_LANGUAGE_UKRAINIAN]              = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_UKRAINIAN);
-   modes[RETRO_LANGUAGE_CZECH]                  = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CZECH);
-   modes[RETRO_LANGUAGE_CATALAN_VALENCIA]       = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CATALAN_VALENCIA);
-   modes[RETRO_LANGUAGE_CATALAN]                = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CATALAN);
-   strlcpy(s, modes[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)], len);
+   translated[RETRO_LANGUAGE_PORTUGUESE_PORTUGAL] = LANGUAGE_PROGRESS_PORTUGUESE_TRANSLATED;
+
+   LANG_DATA(RUSSIAN)
+   LANG_DATA(KOREAN)
+   LANG_DATA(CHINESE_TRADITIONAL)
+   LANG_DATA(CHINESE_SIMPLIFIED)
+   LANG_DATA(ESPERANTO)
+   LANG_DATA(POLISH)
+   LANG_DATA(VIETNAMESE)
+   LANG_DATA(ARABIC)
+   LANG_DATA(GREEK)
+   LANG_DATA(TURKISH)
+   LANG_DATA(SLOVAK)
+   LANG_DATA(PERSIAN)
+   LANG_DATA(HEBREW)
+   LANG_DATA(ASTURIAN)
+   LANG_DATA(FINNISH)
+   LANG_DATA(INDONESIAN)
+   LANG_DATA(SWEDISH)
+   LANG_DATA(UKRAINIAN)
+   LANG_DATA(CZECH)
+
+   modes[RETRO_LANGUAGE_CATALAN_VALENCIA]      = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_CATALAN_VALENCIA);
+   translated[RETRO_LANGUAGE_CATALAN_VALENCIA] = LANGUAGE_PROGRESS_VALENCIAN_TRANSLATED;
+
+   LANG_DATA(CATALAN)
+
+   modes[RETRO_LANGUAGE_BRITISH_ENGLISH]       = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LANG_BRITISH_ENGLISH);
+   translated[RETRO_LANGUAGE_BRITISH_ENGLISH]  = LANGUAGE_PROGRESS_ENGLISH_UNITED_KINGDOM_TRANSLATED;
+
+   LANG_DATA(HUNGARIAN)
+
+   if (*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE) == RETRO_LANGUAGE_ENGLISH)
+   {
+      snprintf(s, len, "%s",
+         modes[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)]);
+   } else {
+      rating = msg_hash_to_str(
+         translated[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)] > 95 ? MENU_ENUM_LABEL_VALUE_LNG_COMPLETION_95_PLUS :
+         translated[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)] > 74 ? MENU_ENUM_LABEL_VALUE_LNG_COMPLETION_75_PLUS :
+         translated[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)] > 49 ? MENU_ENUM_LABEL_VALUE_LNG_COMPLETION_50_PLUS :
+         translated[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)] > 24 ? MENU_ENUM_LABEL_VALUE_LNG_COMPLETION_25_PLUS :
+         MENU_ENUM_LABEL_VALUE_LNG_COMPLETION_25_MINUS);
+      snprintf(s, len, "%s [%s]",
+         modes[*msg_hash_get_uint(MSG_HASH_USER_LANGUAGE)], rating);
+   }
 }
 #endif
 
@@ -6886,16 +6963,23 @@ static void setting_get_string_representation_uint_libretro_log_level(
       rarch_setting_t *setting,
       char *s, size_t len)
 {
-   if (setting)
+   if (!setting)
+      return;
+
+   switch (*setting->value.target.unsigned_integer)
    {
-      static const char *modes[] = {
-         "0 (Debug)",
-         "1 (Info)",
-         "2 (Warning)",
-         "3 (Error)"
-      };
-      strlcpy(s, modes[*setting->value.target.unsigned_integer],
-            len);
+      case 0:
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LOG_VERBOSITY_DEBUG), len);
+         break;
+      case 1:
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LOG_VERBOSITY_INFO), len);
+         break;
+      case 2:
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LOG_VERBOSITY_WARNING), len);
+         break;
+      case 3:
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LOG_VERBOSITY_ERROR), len);
+         break;
    }
 }
 
@@ -6995,6 +7079,44 @@ static void setting_get_string_representation_uint_menu_screensaver_animation(
 }
 #endif
 
+#if defined(HAVE_XMB) || defined(HAVE_OZONE)
+static void setting_get_string_representation_uint_menu_remember_selection(
+      rarch_setting_t *setting,
+      char *s, size_t len)
+{
+   if (!setting)
+      return;
+
+   switch (*setting->value.target.unsigned_integer)
+   {
+      case MENU_REMEMBER_SELECTION_ALWAYS:
+         strlcpy(s,
+               msg_hash_to_str(
+                  MENU_ENUM_LABEL_VALUE_MENU_REMEMBER_SELECTION_ALWAYS),
+               len);
+         break;
+      case MENU_REMEMBER_SELECTION_PLAYLISTS:
+         strlcpy(s,
+               msg_hash_to_str(
+                  MENU_ENUM_LABEL_VALUE_MENU_REMEMBER_SELECTION_PLAYLISTS),
+               len);
+         break;
+      case MENU_REMEMBER_SELECTION_MAIN:
+         strlcpy(s,
+               msg_hash_to_str(
+                  MENU_ENUM_LABEL_VALUE_MENU_REMEMBER_SELECTION_MAIN),
+               len);
+         break;
+      case MENU_REMEMBER_SELECTION_OFF:
+         strlcpy(s,
+               msg_hash_to_str(
+                  MENU_ENUM_LABEL_VALUE_OFF),
+               len);
+         break;
+   }
+}
+#endif
+
 #ifdef HAVE_MIST
 static void setting_get_string_representation_steam_rich_presence_format(
       rarch_setting_t *setting,
@@ -7047,30 +7169,30 @@ static void menu_settings_list_current_add_range(
    unsigned idx                   = list_info->index - 1;
 
    if ((*list)[idx].type == ST_FLOAT)
-      (*list)[list_info->index - 1].ui_type
-                                  = ST_UI_TYPE_FLOAT_SLIDER_AND_SPINBOX;
-
+      (*list)[idx].ui_type        = ST_UI_TYPE_FLOAT_SLIDER_AND_SPINBOX;
+                                  
    (*list)[idx].min               = min;
    (*list)[idx].step              = step;
    (*list)[idx].max               = max;
-   (*list)[idx].enforce_minrange  = enforce_minrange_enable;
-   (*list)[idx].enforce_maxrange  = enforce_maxrange_enable;
-
-   (*list)[list_info->index - 1].flags |= SD_FLAG_HAS_RANGE;
+   if (enforce_minrange_enable)
+      (*list)[idx].flags         |= SD_FLAG_ENFORCE_MINRANGE;
+   if (enforce_maxrange_enable)
+      (*list)[idx].flags         |= SD_FLAG_ENFORCE_MAXRANGE;
+   (*list)[idx].flags            |= SD_FLAG_HAS_RANGE;
 }
 
 int menu_setting_generic(rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   uint64_t flags = setting->flags;
+   uint32_t flags = setting->flags;
    if (setting_generic_action_ok_default(setting, idx, wraparound) != 0)
       return -1;
 
    if (setting->change_handler)
       setting->change_handler(setting);
 
-   if ((flags & SD_FLAG_EXIT) && setting->cmd_trigger_event_triggered)
+   if ((flags & SD_FLAG_EXIT) && (flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED))
    {
-      setting->cmd_trigger_event_triggered = false;
+      setting->flags &= ~SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED;
       return -1;
    }
 
@@ -7090,8 +7212,8 @@ int menu_action_handle_setting(rarch_setting_t *setting,
          {
             menu_displaylist_info_t  info;
             settings_t *settings          = config_get_ptr();
-            file_list_t       *menu_stack = menu_entries_get_menu_stack_ptr(0);
-            const char      *name         = setting->name;
+            file_list_t *menu_stack       = menu_entries_get_menu_stack_ptr(0);
+            const char *name              = setting->name;
             size_t selection              = menu_navigation_get_selection();
 
             menu_displaylist_info_init(&info);
@@ -7101,6 +7223,26 @@ int menu_action_handle_setting(rarch_setting_t *setting,
             info.type                     = type;
             info.directory_ptr            = selection;
             info.list                     = menu_stack;
+
+            /* Menu background image */
+            if (string_is_equal(info.label, msg_hash_to_str(MENU_ENUM_LABEL_MENU_WALLPAPER)))
+            {
+               /* Start from current wallpaper instead if available */
+               if (!string_is_empty(settings->paths.path_menu_wallpaper))
+               {
+                  free(info.path);
+                  info.path = strdup(settings->paths.path_menu_wallpaper);
+               }
+            }
+
+            /* Browse basedir instead and set selection to file if available */
+            if (!string_is_empty(info.path) && !path_is_directory(info.path))
+            {
+               const char *selection_path = path_basename(info.path);
+               if (!string_is_empty(selection_path))
+                  menu_driver_set_pending_selection(selection_path);
+               path_basedir(info.path);
+            }
 
             if (menu_displaylist_ctl(DISPLAYLIST_GENERIC, &info, settings))
                menu_displaylist_process(&info);
@@ -7288,7 +7430,7 @@ int menu_setting_set(unsigned type, unsigned action, bool wraparound)
  *
  * Returns: 0 on success, -1 on error.
  **/
-static int setting_action_start_bind_device(rarch_setting_t *setting)
+static int setting_action_start_input_device_index(rarch_setting_t *setting)
 {
    settings_t      *settings = config_get_ptr();
 
@@ -7296,7 +7438,8 @@ static int setting_action_start_bind_device(rarch_setting_t *setting)
       return -1;
 
    configuration_set_uint(settings,
-         settings->uints.input_joypad_index[setting->index_offset], setting->index_offset);
+         settings->uints.input_joypad_index[setting->index_offset],
+         setting->index_offset);
    return 0;
 }
 
@@ -7440,15 +7583,16 @@ static int setting_action_start_video_refresh_rate_polled(
    return setting_action_ok_video_refresh_rate_polled(setting, 0, false);
 }
 
-static int setting_action_start_mouse_index(rarch_setting_t *setting)
+static int setting_action_start_input_mouse_index(rarch_setting_t *setting)
 {
-   settings_t *settings     = config_get_ptr();
+   settings_t      *settings = config_get_ptr();
 
-   if (!setting)
+   if (!setting || !settings)
       return -1;
 
-   settings->uints.input_mouse_index[setting->index_offset] = setting->index_offset;
-   settings->modified = true;
+   configuration_set_uint(settings,
+         settings->uints.input_mouse_index[setting->index_offset],
+         setting->index_offset);
    return 0;
 }
 
@@ -7545,39 +7689,41 @@ static int setting_action_right_input_remap_port(
    return 0;
 }
 
-static int setting_action_right_bind_device(
+static int setting_action_right_input_device_index(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   unsigned index_offset;
-   unsigned               *p = NULL;
-   unsigned max_devices      = input_config_get_device_count();
    settings_t      *settings = config_get_ptr();
+   unsigned *p               = NULL;
 
-   if (!setting)
+   if (!setting || !settings)
       return -1;
 
-   index_offset = setting->index_offset;
+   p = &settings->uints.input_joypad_index[setting->index_offset];
 
-   p = &settings->uints.input_joypad_index[index_offset];
-
-   if (*p < max_devices)
+   if (*p < MAX_INPUT_DEVICES - 1)
       (*p)++;
+   else
+      *p = 0;
 
+   settings->modified = true;
    return 0;
 }
 
-static int setting_action_right_mouse_index(
+static int setting_action_right_input_mouse_index(
       rarch_setting_t *setting, size_t idx, bool wraparound)
 {
-   settings_t *settings     = config_get_ptr();
+   settings_t      *settings = config_get_ptr();
+   unsigned *p               = NULL;
 
-   if (!setting)
+   if (!setting || !settings)
       return -1;
 
-   if (settings->uints.input_mouse_index[setting->index_offset] < MAX_USERS - 1)
-      ++settings->uints.input_mouse_index[setting->index_offset];
+   p = &settings->uints.input_mouse_index[setting->index_offset];
+
+   if (*p < MAX_INPUT_DEVICES - 1)
+      (*p)++;
    else
-      settings->uints.input_mouse_index[setting->index_offset] = 0;
+      *p = 0;
 
    settings->modified = true;
    return 0;
@@ -7631,61 +7777,59 @@ static void get_string_representation_split_joycon(rarch_setting_t *setting, cha
 }
 #endif
 
-static void get_string_representation_bind_device(rarch_setting_t *setting, char *s,
-      size_t len)
+static void get_string_representation_input_device_index(
+      rarch_setting_t *setting, char *s, size_t len)
 {
-   unsigned index_offset, map = 0;
-   unsigned max_devices      = input_config_get_device_count();
    settings_t      *settings = config_get_ptr();
+   unsigned map              = 0;
 
-   if (!setting)
+   if (!setting || !settings)
       return;
 
-   index_offset = setting->index_offset;
-   map          = settings->uints.input_joypad_index[index_offset];
+   map = settings->uints.input_joypad_index[setting->index_offset];
 
-   if (map < max_devices)
+   if (map < MAX_INPUT_DEVICES)
    {
-      const char *device_name = input_config_get_device_display_name(map) ?
-         input_config_get_device_display_name(map) : input_config_get_device_name(map);
+      const char *device_name = input_config_get_device_display_name(map)
+            ? input_config_get_device_display_name(map)
+            : input_config_get_device_name(map);
 
       if (!string_is_empty(device_name))
       {
          unsigned idx = input_config_get_device_name_index(map);
 
-         /*if idx is non-zero, it's part of a set*/
-         if ( idx > 0)
+         /* If idx is non-zero, it's part of a set */
+         if (idx > 0)
             snprintf(s, len,
-                  "%s (#%u)",
+                  "%s (%u)",
                   device_name,
                   idx);
          else
             strlcpy(s, device_name, len);
       }
       else
-         snprintf(s, len, "%s (%s %u)",
+         snprintf(s, len,
+               "%s (#%u)",
                msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NOT_AVAILABLE),
-               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_PORT),
-               map);
+               map + 1);
    }
-   else
+
+   if (string_is_empty(s))
       strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED), len);
 }
 
-static void get_string_representation_mouse_index(rarch_setting_t *setting, char *s,
-      size_t len)
+static void get_string_representation_input_mouse_index(
+      rarch_setting_t *setting, char *s, size_t len)
 {
-   unsigned index_offset, map = 0;
-   unsigned max_devices       = MAX_USERS;
-   settings_t      *settings  = config_get_ptr();
+   settings_t      *settings = config_get_ptr();
+   unsigned map              = 0;
 
-   if (!setting)
+   if (!setting || !settings)
       return;
 
-   index_offset = setting->index_offset;
-   map          = settings->uints.input_mouse_index[index_offset];
+   map = settings->uints.input_mouse_index[setting->index_offset];
 
-   if (map < max_devices)
+   if (map < MAX_INPUT_DEVICES)
    {
       const char *device_name = input_config_get_mouse_display_name(map);
 
@@ -7695,14 +7839,13 @@ static void get_string_representation_mouse_index(rarch_setting_t *setting, char
          snprintf(s, len,
                "%s (#%u)",
                msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NOT_AVAILABLE),
-               map);
+               map + 1);
       else
-         strlcpy(s,
-               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DONT_CARE), len);
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DONT_CARE), len);
    }
-   else
-      snprintf(s, len,
-         "#%u", map);
+
+   if (string_is_empty(s))
+      strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DISABLED), len);
 }
 
 static void read_handler_audio_rate_control_delta(rarch_setting_t *setting)
@@ -7747,6 +7890,11 @@ static void general_read_handler(rarch_setting_t *setting)
       case MENU_ENUM_LABEL_INPUT_PLAYER5_JOYPAD_INDEX:
          *setting->value.target.integer = settings->uints.input_joypad_index[setting->enum_idx - MENU_ENUM_LABEL_INPUT_PLAYER1_JOYPAD_INDEX];
          break;
+#ifdef ANDROID
+       case MENU_ENUM_LABEL_INPUT_SELECT_PHYSICAL_KEYBOARD:
+           setting->value.target.string = settings->arrays.input_android_physical_keyboard;
+           break;
+#endif
       default:
          break;
    }
@@ -7756,12 +7904,13 @@ static enum event_command write_handler_get_cmd(rarch_setting_t *setting)
 {
    if (setting && setting->cmd_trigger_idx != CMD_EVENT_NONE)
    {
-      if (setting->flags & SD_FLAG_EXIT)
+      uint32_t flags = setting->flags;
+      if (flags & SD_FLAG_EXIT)
          if (*setting->value.target.boolean)
             *setting->value.target.boolean = false;
 
-      if (setting->cmd_trigger_event_triggered ||
-            (setting->flags & SD_FLAG_CMD_APPLY_AUTO))
+      if (  (flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED) ||
+            (flags & SD_FLAG_CMD_APPLY_AUTO))
          return setting->cmd_trigger_idx;
    }
    return CMD_EVENT_NONE;
@@ -7789,7 +7938,7 @@ static void write_handler_audio_rate_control_delta(rarch_setting_t *setting)
       audio_set_float(AUDIO_ACTION_RATE_CONTROL_DELTA, *setting->value.target.fraction);
    }
 
-   if (rarch_cmd || setting->cmd_trigger_event_triggered)
+   if (rarch_cmd || (setting->flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED))
       command_event(rarch_cmd, NULL);
 }
 
@@ -7818,7 +7967,7 @@ static void write_handler_logging_verbosity(rarch_setting_t *setting)
    }
    retroarch_override_setting_unset(RARCH_OVERRIDE_SETTING_VERBOSITY, NULL);
 
-   if (rarch_cmd || setting->cmd_trigger_event_triggered)
+   if (rarch_cmd || (setting->flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED))
       command_event(rarch_cmd, NULL);
 }
 
@@ -7836,26 +7985,8 @@ static void general_write_handler(rarch_setting_t *setting)
       case MENU_ENUM_LABEL_VIDEO_SHADERS_ENABLE:
 #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
          {
-            if (*setting->value.target.boolean)
-            {
-               bool refresh                = false;
-               menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
-               menu_driver_ctl(RARCH_MENU_CTL_SET_PREVENT_POPULATE, NULL);
-            }
-            else
-            {
-               bool refresh                = false;
-               settings_t *settings        = config_get_ptr();
-               struct video_shader *shader = menu_shader_get();
-
-               shader->passes              = 0;
-               shader->modified            = true;
-
-               menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
-               menu_driver_ctl(RARCH_MENU_CTL_SET_PREVENT_POPULATE, NULL);
-               command_event(CMD_EVENT_SHADERS_APPLY_CHANGES, NULL);
-               configuration_set_bool(settings, settings->bools.video_shader_enable, false);
-            }
+            settings_t *settings        = config_get_ptr();
+            video_shader_toggle(settings);
          }
 #endif
          break;
@@ -8019,7 +8150,7 @@ static void general_write_handler(rarch_setting_t *setting)
          {
             settings_t *settings         = config_get_ptr();
             settings->modified           = true;
-            settings->floats.video_scale = roundf(*setting->value.target.fraction);
+            settings->uints.video_scale  = *setting->value.target.unsigned_integer;
 
             if (!settings->bools.video_fullscreen)
                rarch_cmd = CMD_EVENT_REINIT;
@@ -8065,7 +8196,7 @@ static void general_write_handler(rarch_setting_t *setting)
          {
             settings_t *settings                   = config_get_ptr();
             settings->modified                     = true;
-            settings->bools.video_hdr_expand_gamut = *setting->value.target.boolean;;
+            settings->bools.video_hdr_expand_gamut = *setting->value.target.boolean;
 
             video_driver_set_hdr_expand_gamut(settings->bools.video_hdr_expand_gamut);
          }
@@ -8084,6 +8215,15 @@ static void general_write_handler(rarch_setting_t *setting)
             settings->uints.input_joypad_index[setting->enum_idx - MENU_ENUM_LABEL_INPUT_PLAYER1_JOYPAD_INDEX]             = *setting->value.target.integer;
          }
          break;
+#ifdef ANDROID
+       case MENU_ENUM_LABEL_INPUT_SELECT_PHYSICAL_KEYBOARD:
+       {
+           settings_t *settings         = config_get_ptr();
+           settings->modified           = true;
+           strlcpy(settings->arrays.input_android_physical_keyboard, setting->value.target.string, sizeof(settings->arrays.input_android_physical_keyboard));
+       }
+           break;
+#endif
       case MENU_ENUM_LABEL_LOG_TO_FILE:
          if (verbosity_is_enabled())
          {
@@ -8267,8 +8407,7 @@ static void general_write_handler(rarch_setting_t *setting)
       case MENU_ENUM_LABEL_MIDI_OUTPUT:
          {
             settings_t *settings       = config_get_ptr();
-            midi_driver_set_output(settings,
-                  settings->arrays.midi_output);
+            midi_driver_set_output(settings, settings->arrays.midi_output);
          }
          break;
       case MENU_ENUM_LABEL_MIDI_VOLUME:
@@ -8363,8 +8502,8 @@ static void general_write_handler(rarch_setting_t *setting)
 
                /* In all cases, need to close and reopen
                 * playlist file (to update maximum capacity) */
-               rarch_favorites_deinit();
-               rarch_favorites_init();
+               retroarch_favorites_deinit();
+               retroarch_favorites_init();
             }
          }
          break;
@@ -8515,31 +8654,6 @@ static void general_write_handler(rarch_setting_t *setting)
                            default_aspect;
          }
          break;
-#if defined(HAVE_RUNAHEAD) && (defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB))
-      case MENU_ENUM_LABEL_RUN_AHEAD_ENABLED:
-      case MENU_ENUM_LABEL_RUN_AHEAD_FRAMES:
-      case MENU_ENUM_LABEL_RUN_AHEAD_SECONDARY_INSTANCE:
-         {
-            settings_t *settings              = config_get_ptr();
-            bool run_ahead_enabled            = settings->bools.run_ahead_enabled;
-            unsigned run_ahead_frames         = settings->uints.run_ahead_frames;
-            bool run_ahead_secondary_instance = settings->bools.run_ahead_secondary_instance;
-
-            /* If any changes here will cause second
-             * instance runahead to be enabled, must
-             * re-apply cheats to ensure that they
-             * propagate to the newly-created secondary
-             * core */
-            if (run_ahead_enabled &&
-                (run_ahead_frames > 0) &&
-                run_ahead_secondary_instance &&
-                !retroarch_ctl(RARCH_CTL_IS_SECOND_CORE_LOADED, NULL) &&
-                retroarch_ctl(RARCH_CTL_IS_SECOND_CORE_AVAILABLE, NULL) &&
-                command_event(CMD_EVENT_LOAD_SECOND_CORE, NULL))
-               command_event(CMD_EVENT_CHEATS_APPLY, NULL);
-         }
-         break;
-#endif
       default:
          /* Special cases */
 
@@ -8562,7 +8676,7 @@ static void general_write_handler(rarch_setting_t *setting)
          break;
    }
 
-   if (rarch_cmd || setting->cmd_trigger_event_triggered)
+   if (rarch_cmd || (setting->flags & SD_FLAG_CMD_TRIGGER_EVENT_TRIGGERED))
       command_event(rarch_cmd, NULL);
 }
 
@@ -8573,6 +8687,104 @@ static void frontend_log_level_change_handler(rarch_setting_t *setting)
 
    verbosity_set_log_level(*setting->value.target.unsigned_integer);
 }
+
+#ifdef HAVE_RUNAHEAD
+static void runahead_change_handler(rarch_setting_t *setting)
+{
+   settings_t *settings              = config_get_ptr();
+   bool run_ahead_enabled            = settings->bools.run_ahead_enabled;
+   bool preempt_enabled              = settings->bools.preemptive_frames_enable;
+   bool refresh                      = false;
+#if (defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB))
+   unsigned run_ahead_frames         = settings->uints.run_ahead_frames;
+   bool run_ahead_secondary_instance = settings->bools.run_ahead_secondary_instance;
+#endif
+
+   if (!setting)
+      return;
+
+   switch (setting->enum_idx)
+   {
+      case MENU_ENUM_LABEL_RUN_AHEAD_ENABLED:
+         if (run_ahead_enabled && preempt_enabled)
+         {
+            /* Disable preemptive frames and inform user */
+            settings->bools.preemptive_frames_enable = false;
+            preempt_deinit(runloop_state_get_ptr());
+            runloop_msg_queue_push(
+                  msg_hash_to_str(MSG_PREEMPT_DISABLED), 1, 100, false,
+                  NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+         }
+         menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
+         /* fall-through */
+      case MENU_ENUM_LABEL_RUN_AHEAD_FRAMES:
+#if (defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB))
+      case MENU_ENUM_LABEL_RUN_AHEAD_SECONDARY_INSTANCE:
+         /* If any changes here will cause second
+          * instance runahead to be enabled, must
+          * re-apply cheats to ensure that they
+          * propagate to the newly-created secondary
+          * core */
+         if (     run_ahead_enabled
+               && (run_ahead_frames > 0)
+               && run_ahead_secondary_instance
+               && !retroarch_ctl(RARCH_CTL_IS_SECOND_CORE_LOADED, NULL)
+               && retroarch_ctl(RARCH_CTL_IS_SECOND_CORE_AVAILABLE, NULL)
+               && command_event(CMD_EVENT_LOAD_SECOND_CORE, NULL))
+            command_event(CMD_EVENT_CHEATS_APPLY, NULL);
+#endif
+         break;
+      default:
+         break;
+   }
+}
+
+static void preempt_change_handler(rarch_setting_t *setting)
+{
+   settings_t *settings   = config_get_ptr();
+   bool preempt_enabled   = settings->bools.preemptive_frames_enable;
+   bool run_ahead_enabled = settings->bools.run_ahead_enabled;
+   preempt_t *preempt     = runloop_state_get_ptr()->preempt_data;
+   bool refresh           = false;
+   bool netplay_enabled;
+
+#ifdef HAVE_NETWORKING
+   netplay_enabled = netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_ENABLED, NULL);
+#else
+   netplay_enabled = false;
+#endif
+
+   if (!setting)
+      return;
+
+   switch (setting->enum_idx)
+   {
+      case MENU_ENUM_LABEL_PREEMPT_ENABLE:
+         if (preempt_enabled && run_ahead_enabled)
+         {
+            /* Disable runahead and inform user */
+            settings->bools.run_ahead_enabled = false;
+            runloop_msg_queue_push(
+                  msg_hash_to_str(MSG_RUNAHEAD_DISABLED), 1, 100, false,
+                  NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+         }
+
+         if ((preempt_enabled != !!preempt) && !netplay_enabled)
+            command_event(CMD_EVENT_PREEMPT_UPDATE, NULL);
+
+         menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
+         break;
+      case MENU_ENUM_LABEL_PREEMPT_FRAMES:
+         if (     preempt
+               && preempt->frames != settings->uints.run_ahead_frames
+               && !netplay_enabled)
+            command_event(CMD_EVENT_PREEMPT_UPDATE, NULL);
+         break;
+      default:
+         break;
+   }
+}
+#endif
 
 #ifdef HAVE_OVERLAY
 static void overlay_enable_toggle_change_handler(rarch_setting_t *setting)
@@ -8667,6 +8879,36 @@ static void achievement_leaderboards_enabled_write_handler(rarch_setting_t* sett
    rcheevos_leaderboards_enabled_changed();
 }
 
+static void setting_get_string_representation_uint_cheevos_visibility_summary(
+   rarch_setting_t* setting,
+   char* s, size_t len)
+{
+   if (!setting)
+      return;
+
+   switch (*setting->value.target.unsigned_integer)
+   {
+   case RCHEEVOS_SUMMARY_ALLGAMES:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_SUMMARY_ALLGAMES),
+         len);
+      break;
+   case RCHEEVOS_SUMMARY_HASCHEEVOS:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_SUMMARY_HASCHEEVOS),
+         len);
+      break;
+   case RCHEEVOS_SUMMARY_OFF:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_OFF),
+         len);
+      break;
+   }
+}
+
 static void achievement_leaderboards_get_string_representation(rarch_setting_t* setting, char* s, size_t len)
 {
    const char* value = setting->value.target.string;
@@ -8688,6 +8930,60 @@ static void achievement_leaderboards_get_string_representation(rarch_setting_t* 
 #endif
 }
 
+#ifdef HAVE_GFX_WIDGETS
+static void setting_get_string_representation_uint_cheevos_appearance_anchor(
+   rarch_setting_t* setting,
+   char* s, size_t len)
+{
+   if (!setting)
+      return;
+
+   switch (*setting->value.target.unsigned_integer)
+   {
+   case CHEEVOS_APPEARANCE_ANCHOR_TOPLEFT:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_TOPLEFT),
+         len);
+      break;
+   case CHEEVOS_APPEARANCE_ANCHOR_TOPCENTER:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_TOPCENTER),
+         len);
+      break;
+   case CHEEVOS_APPEARANCE_ANCHOR_TOPRIGHT:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_TOPRIGHT),
+         len);
+      break;
+   case CHEEVOS_APPEARANCE_ANCHOR_BOTTOMLEFT:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_BOTTOMLEFT),
+         len);
+      break;
+   case CHEEVOS_APPEARANCE_ANCHOR_BOTTOMCENTER:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_BOTTOMCENTER),
+         len);
+      break;
+   case CHEEVOS_APPEARANCE_ANCHOR_BOTTOMRIGHT:
+      strlcpy(s,
+         msg_hash_to_str(
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR_BOTTOMRIGHT),
+         len);
+      break;
+   }
+}
+
+static void cheevos_appearance_write_handler(rarch_setting_t* setting)
+{
+   gfx_widgets_update_cheevos_appearance();
+}
+#endif
 #endif
 
 static void update_streaming_url_write_handler(rarch_setting_t *setting)
@@ -8749,16 +9045,15 @@ static void localap_enable_toggle_change_handler(rarch_setting_t *setting)
 
 static void timezone_change_handler(rarch_setting_t *setting)
 {
+   RFILE *tzfp;
    if (!setting)
       return;
 
    config_set_timezone(setting->value.target.string);
 
-   RFILE *tzfp = filestream_open(LAKKA_TIMEZONE_PATH,
-                       RETRO_VFS_FILE_ACCESS_WRITE,
-                       RETRO_VFS_FILE_ACCESS_HINT_NONE);
-
-   if (tzfp != NULL)
+   if ((tzfp = filestream_open(LAKKA_TIMEZONE_PATH,
+               RETRO_VFS_FILE_ACCESS_WRITE,
+               RETRO_VFS_FILE_ACCESS_HINT_NONE)))
    {
       filestream_printf(tzfp, "TIMEZONE=%s", setting->value.target.string);
       filestream_close(tzfp);
@@ -8769,10 +9064,8 @@ static void timezone_change_handler(rarch_setting_t *setting)
 #ifdef _3DS
 static void new3ds_speedup_change_handler(rarch_setting_t *setting)
 {
-   if (!setting)
-      return;
-
-   osSetSpeedupEnable(*setting->value.target.boolean);
+   if (setting)
+      osSetSpeedupEnable(*setting->value.target.boolean);
 }
 #endif
 
@@ -8787,25 +9080,25 @@ static bool setting_append_list_input_player_options(
     * 2 is the length of '99'; we don't need more users than that.
     */
    static char buffer[MAX_USERS][13+2+1];
-   static char group_lbl[MAX_USERS][255];
+   static char group_label[MAX_USERS][255];
    unsigned i, j;
    rarch_setting_group_info_t group_info;
    rarch_setting_group_info_t subgroup_info;
    settings_t *settings                       = config_get_ptr();
    rarch_system_info_t *system                = &runloop_state_get_ptr()->system;
-   const struct retro_keybind* const defaults =
-      (user == 0) ? retro_keybinds_1 : retro_keybinds_rest;
+   const struct retro_keybind* const defaults = (user == 0)
+         ? retro_keybinds_1 : retro_keybinds_rest;
    const char *temp_value                     = msg_hash_to_str
-      ((enum msg_hash_enums)(MENU_ENUM_LABEL_INPUT_USER_1_BINDS + user));
+         ((enum msg_hash_enums)(MENU_ENUM_LABEL_INPUT_USER_1_BINDS + user));
 
    group_info.name                            = NULL;
    subgroup_info.name                         = NULL;
 
    strlcat(buffer[user], "", sizeof(buffer[user]));
 
-   strlcpy(group_lbl[user], temp_value, sizeof(group_lbl[user]));
+   strlcpy(group_label[user], temp_value, sizeof(group_label[user]));
 
-   START_GROUP(list, list_info, &group_info, group_lbl[user], parent_group);
+   START_GROUP(list, list_info, &group_info, group_label[user], parent_group);
 
    parent_group = msg_hash_to_str(MENU_ENUM_LABEL_SETTINGS);
 
@@ -8819,60 +9112,54 @@ static bool setting_append_list_input_player_options(
 
    {
       char tmp_string[PATH_MAX_LENGTH];
-      /* These constants match the string lengths.
-       * Keep them up to date or you'll get some really obvious bugs.
-       * 2 is the length of '99'; we don't need more users than that.
-       */
-      /* FIXME/TODO - really need to clean up this mess in some way. */
-      static char key[MAX_USERS][64];
-      static char key_analog[MAX_USERS][64];
-      static char key_bind_all[MAX_USERS][64];
-      static char key_bind_all_save_autoconfig[MAX_USERS][64];
-      static char split_joycon[MAX_USERS][64];
-      static char split_joycon_lbl[MAX_USERS][64];
-      static char key_bind_defaults[MAX_USERS][64];
-      static char mouse_index[MAX_USERS][64];
 
-      static char label[MAX_USERS][64];
-      static char label_analog[MAX_USERS][64];
+      static char device_index[MAX_USERS][64];
+      static char mouse_index[MAX_USERS][64];
+      static char analog_to_digital[MAX_USERS][64];
+      static char bind_all[MAX_USERS][64];
+      static char bind_all_save_autoconfig[MAX_USERS][64];
+      static char bind_defaults[MAX_USERS][64];
+
+      static char label_device_index[MAX_USERS][64];
+      static char label_mouse_index[MAX_USERS][64];
+      static char label_analog_to_digital[MAX_USERS][64];
       static char label_bind_all[MAX_USERS][64];
       static char label_bind_all_save_autoconfig[MAX_USERS][64];
       static char label_bind_defaults[MAX_USERS][64];
-      static char label_mouse_index[MAX_USERS][64];
+
+#ifdef HAVE_LIBNX
+      static char split_joycon[MAX_USERS][64];
+      static char label_split_joycon[MAX_USERS][64];
+#endif
 
       tmp_string[0] = '\0';
 
       snprintf(tmp_string, sizeof(tmp_string), "input_player%u", user + 1);
 
-      fill_pathname_join_delim(key[user], tmp_string, "joypad_index", '_',
-            sizeof(key[user]));
-      snprintf(key_analog[user], sizeof(key_analog[user]),
-               msg_hash_to_str(MENU_ENUM_LABEL_INPUT_PLAYER_ANALOG_DPAD_MODE),
-               user + 1);
-      snprintf(split_joycon[user], sizeof(split_joycon[user]),
-            "%s_%u",
-               msg_hash_to_str(MENU_ENUM_LABEL_INPUT_SPLIT_JOYCON),
-               user + 1);
-      fill_pathname_join_delim(key_bind_all[user], tmp_string, "bind_all", '_',
-            sizeof(key_bind_all[user]));
-      fill_pathname_join_delim(key_bind_all_save_autoconfig[user],
-            tmp_string, "bind_all_save_autoconfig", '_',
-            sizeof(key_bind_all_save_autoconfig[user]));
-      fill_pathname_join_delim(key_bind_defaults[user],
-            tmp_string, "bind_defaults", '_',
-            sizeof(key_bind_defaults[user]));
+      snprintf(analog_to_digital[user], sizeof(analog_to_digital[user]),
+            msg_hash_to_str(MENU_ENUM_LABEL_INPUT_PLAYER_ANALOG_DPAD_MODE), user + 1);
+      fill_pathname_join_delim(device_index[user], tmp_string, "joypad_index", '_',
+            sizeof(device_index[user]));
       fill_pathname_join_delim(mouse_index[user], tmp_string, "mouse_index", '_',
             sizeof(mouse_index[user]));
+      fill_pathname_join_delim(bind_all[user], tmp_string, "bind_all", '_',
+            sizeof(bind_all[user]));
+      fill_pathname_join_delim(bind_all_save_autoconfig[user],
+            tmp_string, "bind_all_save_autoconfig", '_',
+            sizeof(bind_all_save_autoconfig[user]));
+      fill_pathname_join_delim(bind_defaults[user],
+            tmp_string, "bind_defaults", '_',
+            sizeof(bind_defaults[user]));
 
-      snprintf(split_joycon_lbl[user], sizeof(label[user]),
-               "%s %u", msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_SPLIT_JOYCON), user + 1);
-
-      strlcpy(label[user],
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_DEVICE_INDEX),
-            sizeof(label[user]));
-      strlcpy(label_analog[user],
+      strlcpy(label_analog_to_digital[user],
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_ADC_TYPE),
-            sizeof(label_analog[user]));
+            sizeof(label_analog_to_digital[user]));
+      strlcpy(label_device_index[user],
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_DEVICE_INDEX),
+            sizeof(label_device_index[user]));
+      strlcpy(label_mouse_index[user],
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_MOUSE_INDEX),
+            sizeof(label_mouse_index[user]));
       strlcpy(label_bind_all[user], 
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_BIND_ALL),
             sizeof(label_bind_all[user]));
@@ -8882,15 +9169,19 @@ static bool setting_append_list_input_player_options(
       strlcpy(label_bind_all_save_autoconfig[user],
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_SAVE_AUTOCONFIG),
             sizeof(label_bind_all_save_autoconfig[user]));
-      strlcpy(label_mouse_index[user],
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_MOUSE_INDEX),
-            sizeof(label_mouse_index[user]));
+
+#ifdef HAVE_LIBNX
+      snprintf(split_joycon[user], sizeof(split_joycon[user]),
+            "%s_%u", msg_hash_to_str(MENU_ENUM_LABEL_INPUT_SPLIT_JOYCON), user + 1);
+      snprintf(label_split_joycon[user], sizeof(label_split_joycon[user]),
+            "%s %u", msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_SPLIT_JOYCON), user + 1);
+#endif
 
       CONFIG_UINT_ALT(
             list, list_info,
             &settings->uints.input_analog_dpad_mode[user],
-            key_analog[user],
-            label_analog[user],
+            analog_to_digital[user],
+            label_analog_to_digital[user],
             user,
             &group_info,
             &subgroup_info,
@@ -8915,7 +9206,7 @@ static bool setting_append_list_input_player_options(
             list, list_info,
             &settings->uints.input_split_joycon[user],
             split_joycon[user],
-            split_joycon_lbl[user],
+            label_split_joycon[user],
             user,
             &group_info,
             &subgroup_info,
@@ -8926,31 +9217,36 @@ static bool setting_append_list_input_player_options(
       (*list)[list_info->index - 1].index_offset  = user;
 #if 0
       (*list)[list_info->index - 1].action_ok     = &setting_action_ok_uint;
-      (*list)[list_info->index - 1].action_start  = &setting_action_start_bind_device;
-      (*list)[list_info->index - 1].action_left   = &setting_action_left_bind_device;
-      (*list)[list_info->index - 1].action_right  = &setting_action_right_bind_device;
-      (*list)[list_info->index - 1].action_select = &setting_action_right_bind_device;
+      (*list)[list_info->index - 1].action_start  = &setting_action_start_input_device_index;
+      (*list)[list_info->index - 1].action_left   = &setting_action_left_input_device_index;
+      (*list)[list_info->index - 1].action_right  = &setting_action_right_input_device_index;
+      (*list)[list_info->index - 1].action_select = &setting_action_right_input_device_index;
 #endif
       (*list)[list_info->index - 1].get_string_representation = &get_string_representation_split_joycon;
       menu_settings_list_current_add_range(list, list_info, 0, 1, 1.0, true, true);
 #endif
 
-      CONFIG_ACTION_ALT(
+      CONFIG_UINT_ALT(
             list, list_info,
-            key[user],
-            label[user],
+            &settings->uints.input_joypad_index[user],
+            device_index[user],
+            label_device_index[user],
+            user,
             &group_info,
             &subgroup_info,
-            parent_group);
+            parent_group,
+            general_write_handler,
+            general_read_handler);
       (*list)[list_info->index - 1].index         = user + 1;
       (*list)[list_info->index - 1].index_offset  = user;
-      (*list)[list_info->index - 1].action_start  = &setting_action_start_bind_device;
-      (*list)[list_info->index - 1].action_left   = &setting_action_left_bind_device;
-      (*list)[list_info->index - 1].action_right  = &setting_action_right_bind_device;
-      (*list)[list_info->index - 1].action_select = &setting_action_right_bind_device;
-      (*list)[list_info->index - 1].action_ok     = &setting_action_ok_bind_device;
+      (*list)[list_info->index - 1].action_start  = &setting_action_start_input_device_index;
+      (*list)[list_info->index - 1].action_left   = &setting_action_left_input_device_index;
+      (*list)[list_info->index - 1].action_right  = &setting_action_right_input_device_index;
+      (*list)[list_info->index - 1].action_select = &setting_action_right_input_device_index;
+      (*list)[list_info->index - 1].action_ok     = &setting_action_ok_uint;
       (*list)[list_info->index - 1].get_string_representation =
-         &get_string_representation_bind_device;
+            &get_string_representation_input_device_index;
+      menu_settings_list_current_add_range(list, list_info, 0, MAX_INPUT_DEVICES - 1, 1.0, true, true);
       MENU_SETTINGS_LIST_CURRENT_ADD_ENUM_IDX_PTR(list, list_info,
             (enum msg_hash_enums)(MENU_ENUM_LABEL_INPUT_DEVICE_INDEX + user));
 
@@ -8967,20 +9263,20 @@ static bool setting_append_list_input_player_options(
             general_read_handler);
       (*list)[list_info->index - 1].index         = user + 1;
       (*list)[list_info->index - 1].index_offset  = user;
-      (*list)[list_info->index - 1].action_start  = &setting_action_start_mouse_index;
-      (*list)[list_info->index - 1].action_left   = &setting_action_left_mouse_index;
-      (*list)[list_info->index - 1].action_right  = &setting_action_right_mouse_index;
-      (*list)[list_info->index - 1].action_select = &setting_action_right_mouse_index;
+      (*list)[list_info->index - 1].action_start  = &setting_action_start_input_mouse_index;
+      (*list)[list_info->index - 1].action_left   = &setting_action_left_input_mouse_index;
+      (*list)[list_info->index - 1].action_right  = &setting_action_right_input_mouse_index;
+      (*list)[list_info->index - 1].action_select = &setting_action_right_input_mouse_index;
       (*list)[list_info->index - 1].action_ok     = &setting_action_ok_uint;
       (*list)[list_info->index - 1].get_string_representation =
-         &get_string_representation_mouse_index;
-      menu_settings_list_current_add_range(list, list_info, 0, MAX_USERS - 1, 1.0, true, true);
+            &get_string_representation_input_mouse_index;
+      menu_settings_list_current_add_range(list, list_info, 0, MAX_INPUT_DEVICES - 1, 1.0, true, true);
       MENU_SETTINGS_LIST_CURRENT_ADD_ENUM_IDX_PTR(list, list_info,
             (enum msg_hash_enums)(MENU_ENUM_LABEL_INPUT_MOUSE_INDEX + user));
 
       CONFIG_ACTION_ALT(
             list, list_info,
-            key_bind_all[user],
+            bind_all[user],
             label_bind_all[user],
             &group_info,
             &subgroup_info,
@@ -8992,7 +9288,7 @@ static bool setting_append_list_input_player_options(
 
       CONFIG_ACTION_ALT(
             list, list_info,
-            key_bind_defaults[user],
+            bind_defaults[user],
             label_bind_defaults[user],
             &group_info,
             &subgroup_info,
@@ -9005,7 +9301,7 @@ static bool setting_append_list_input_player_options(
 #ifdef HAVE_CONFIGFILE
       CONFIG_ACTION_ALT(
             list, list_info,
-            key_bind_all_save_autoconfig[user],
+            bind_all_save_autoconfig[user],
             label_bind_all_save_autoconfig[user],
             &group_info,
             &subgroup_info,
@@ -9518,16 +9814,6 @@ static bool setting_append_list(
 
          CONFIG_ACTION(
                list, list_info,
-               MENU_ENUM_LABEL_RESET_TO_DEFAULT_CONFIG,
-               MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
-               &group_info,
-               &subgroup_info,
-               parent_group);
-         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_RESET_TO_DEFAULT_CONFIG);
-         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
-
-         CONFIG_ACTION(
-               list, list_info,
                MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG,
                MENU_ENUM_LABEL_VALUE_SAVE_CURRENT_CONFIG,
                &group_info,
@@ -9544,6 +9830,16 @@ static bool setting_append_list(
                &subgroup_info,
                parent_group);
          MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_SAVE_CONFIG);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_RESET_TO_DEFAULT_CONFIG,
+               MENU_ENUM_LABEL_VALUE_RESET_TO_DEFAULT_CONFIG,
+               &group_info,
+               &subgroup_info,
+               parent_group);
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_RESET_TO_DEFAULT_CONFIG);
          SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
 
          CONFIG_ACTION(
@@ -9574,6 +9870,36 @@ static bool setting_append_list(
                &subgroup_info,
                parent_group);
          MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_SAVE_CURRENT_CONFIG_OVERRIDE_GAME);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_REMOVE_CURRENT_CONFIG_OVERRIDE_CORE,
+               MENU_ENUM_LABEL_VALUE_REMOVE_CURRENT_CONFIG_OVERRIDE_CORE,
+               &group_info,
+               &subgroup_info,
+               parent_group);
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_REMOVE_CURRENT_CONFIG_OVERRIDE_CORE);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_REMOVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR,
+               MENU_ENUM_LABEL_VALUE_REMOVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR,
+               &group_info,
+               &subgroup_info,
+               parent_group);
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_REMOVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_REMOVE_CURRENT_CONFIG_OVERRIDE_GAME,
+               MENU_ENUM_LABEL_VALUE_REMOVE_CURRENT_CONFIG_OVERRIDE_GAME,
+               &group_info,
+               &subgroup_info,
+               parent_group);
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_MENU_REMOVE_CURRENT_CONFIG_OVERRIDE_GAME);
          SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
 
          CONFIG_ACTION(
@@ -9963,6 +10289,22 @@ static bool setting_append_list(
                &group_info,
                &subgroup_info,
                parent_group);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_SETTINGS,
+               MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_SETTINGS,
+               &group_info,
+               &subgroup_info,
+               parent_group);
+
+         CONFIG_ACTION(
+               list, list_info,
+               MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_SETTINGS,
+               MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_SETTINGS,
+               &group_info,
+               &subgroup_info,
+               parent_group);
 #endif
 
          CONFIG_ACTION(
@@ -10264,9 +10606,9 @@ static bool setting_append_list(
          {
             unsigned i, listing = 0;
 #ifndef HAVE_DYNAMIC
-            struct bool_entry bool_entries[9];
+            struct bool_entry bool_entries[10];
 #else
-            struct bool_entry bool_entries[8];
+            struct bool_entry bool_entries[9];
 #endif
             START_GROUP(list, list_info, &group_info,
                   msg_hash_to_str(MENU_ENUM_LABEL_VALUE_CORE_SETTINGS), parent_group);
@@ -10333,6 +10675,13 @@ static bool setting_append_list(
             bool_entries[listing].flags          = SD_FLAG_ADVANCED;
             listing++;
 
+            bool_entries[listing].target         = &settings->bools.core_info_savestate_bypass;
+            bool_entries[listing].name_enum_idx  = MENU_ENUM_LABEL_CORE_INFO_SAVESTATE_BYPASS;
+            bool_entries[listing].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_CORE_INFO_SAVESTATE_BYPASS;
+            bool_entries[listing].default_value  = DEFAULT_CORE_INFO_SAVESTATE_BYPASS;
+            bool_entries[listing].flags          = SD_FLAG_ADVANCED;
+            listing++;
+
 #ifndef HAVE_DYNAMIC
             bool_entries[listing].target         = &settings->bools.always_reload_core_on_run_content;
             bool_entries[listing].name_enum_idx  = MENU_ENUM_LABEL_ALWAYS_RELOAD_CORE_ON_RUN_CONTENT;
@@ -10395,31 +10744,31 @@ static bool setting_append_list(
             bool_entries[2].target         = &settings->bools.game_specific_options;
             bool_entries[2].name_enum_idx  = MENU_ENUM_LABEL_GAME_SPECIFIC_OPTIONS;
             bool_entries[2].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_GAME_SPECIFIC_OPTIONS;
-            bool_entries[2].default_value  = default_game_specific_options;
+            bool_entries[2].default_value  = DEFAULT_GAME_SPECIFIC_OPTIONS;
             bool_entries[2].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[3].target         = &settings->bools.auto_overrides_enable;
             bool_entries[3].name_enum_idx  = MENU_ENUM_LABEL_AUTO_OVERRIDES_ENABLE;
             bool_entries[3].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_AUTO_OVERRIDES_ENABLE;
-            bool_entries[3].default_value  = default_auto_overrides_enable;
+            bool_entries[3].default_value  = DEFAULT_AUTO_OVERRIDES_ENABLE;
             bool_entries[3].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[4].target         = &settings->bools.auto_remaps_enable;
             bool_entries[4].name_enum_idx  = MENU_ENUM_LABEL_AUTO_REMAPS_ENABLE;
             bool_entries[4].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_AUTO_REMAPS_ENABLE;
-            bool_entries[4].default_value  = default_auto_remaps_enable;
+            bool_entries[4].default_value  = DEFAULT_AUTO_REMAPS_ENABLE;
             bool_entries[4].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[5].target         = &settings->bools.auto_shaders_enable;
             bool_entries[5].name_enum_idx  = MENU_ENUM_LABEL_AUTO_SHADERS_ENABLE;
             bool_entries[5].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_AUTO_SHADERS_ENABLE;
-            bool_entries[5].default_value  = default_auto_shaders_enable;
+            bool_entries[5].default_value  = DEFAULT_AUTO_SHADERS_ENABLE;
             bool_entries[5].flags          = SD_FLAG_NONE;
 
             bool_entries[6].target         = &settings->bools.global_core_options;
             bool_entries[6].name_enum_idx  = MENU_ENUM_LABEL_GLOBAL_CORE_OPTIONS;
             bool_entries[6].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_GLOBAL_CORE_OPTIONS;
-            bool_entries[6].default_value  = default_global_core_options;
+            bool_entries[6].default_value  = DEFAULT_GLOBAL_CORE_OPTIONS;
             bool_entries[6].flags          = SD_FLAG_NONE;
 
             bool_entries[7].target         = &settings->bools.remap_save_on_exit;
@@ -10616,31 +10965,31 @@ static bool setting_append_list(
             bool_entries[0].target         = &settings->bools.sort_savefiles_enable;
             bool_entries[0].name_enum_idx  = MENU_ENUM_LABEL_SORT_SAVEFILES_ENABLE;
             bool_entries[0].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SORT_SAVEFILES_ENABLE;
-            bool_entries[0].default_value  = default_sort_savefiles_enable;
+            bool_entries[0].default_value  = DEFAULT_SORT_SAVEFILES_ENABLE;
             bool_entries[0].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[1].target         = &settings->bools.sort_savestates_enable;
             bool_entries[1].name_enum_idx  = MENU_ENUM_LABEL_SORT_SAVESTATES_ENABLE;
             bool_entries[1].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SORT_SAVESTATES_ENABLE;
-            bool_entries[1].default_value  = default_sort_savestates_enable;
+            bool_entries[1].default_value  = DEFAULT_SORT_SAVESTATES_ENABLE;
             bool_entries[1].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[2].target         = &settings->bools.sort_savefiles_by_content_enable;
             bool_entries[2].name_enum_idx  = MENU_ENUM_LABEL_SORT_SAVEFILES_BY_CONTENT_ENABLE;
             bool_entries[2].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SORT_SAVEFILES_BY_CONTENT_ENABLE;
-            bool_entries[2].default_value  = default_sort_savefiles_by_content_enable;
+            bool_entries[2].default_value  = DEFAULT_SORT_SAVEFILES_BY_CONTENT_ENABLE;
             bool_entries[2].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[3].target         = &settings->bools.sort_savestates_by_content_enable;
             bool_entries[3].name_enum_idx  = MENU_ENUM_LABEL_SORT_SAVESTATES_BY_CONTENT_ENABLE;
             bool_entries[3].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SORT_SAVESTATES_BY_CONTENT_ENABLE;
-            bool_entries[3].default_value  = default_sort_savestates_by_content_enable;
+            bool_entries[3].default_value  = DEFAULT_SORT_SAVESTATES_BY_CONTENT_ENABLE;
             bool_entries[3].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[4].target         = &settings->bools.sort_screenshots_by_content_enable;
             bool_entries[4].name_enum_idx  = MENU_ENUM_LABEL_SORT_SCREENSHOTS_BY_CONTENT_ENABLE;
             bool_entries[4].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SORT_SCREENSHOTS_BY_CONTENT_ENABLE;
-            bool_entries[4].default_value  = default_sort_screenshots_by_content_enable;
+            bool_entries[4].default_value  = DEFAULT_SORT_SCREENSHOTS_BY_CONTENT_ENABLE;
             bool_entries[4].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[5].target         = &settings->bools.block_sram_overwrite;
@@ -10652,43 +11001,43 @@ static bool setting_append_list(
             bool_entries[6].target         = &settings->bools.savestate_auto_save;
             bool_entries[6].name_enum_idx  = MENU_ENUM_LABEL_SAVESTATE_AUTO_SAVE;
             bool_entries[6].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SAVESTATE_AUTO_SAVE;
-            bool_entries[6].default_value  = savestate_auto_save;
+            bool_entries[6].default_value  = DEFAULT_SAVESTATE_AUTO_SAVE;
             bool_entries[6].flags          = SD_FLAG_NONE;
 
             bool_entries[7].target         = &settings->bools.savestate_auto_load;
             bool_entries[7].name_enum_idx  = MENU_ENUM_LABEL_SAVESTATE_AUTO_LOAD;
             bool_entries[7].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SAVESTATE_AUTO_LOAD;
-            bool_entries[7].default_value  = savestate_auto_load;
+            bool_entries[7].default_value  = DEFAULT_SAVESTATE_AUTO_LOAD;
             bool_entries[7].flags          = SD_FLAG_NONE;
 
             bool_entries[8].target         = &settings->bools.savestate_thumbnail_enable;
             bool_entries[8].name_enum_idx  = MENU_ENUM_LABEL_SAVESTATE_THUMBNAIL_ENABLE;
             bool_entries[8].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SAVESTATE_THUMBNAIL_ENABLE;
-            bool_entries[8].default_value  = savestate_thumbnail_enable;
+            bool_entries[8].default_value  = DEFAULT_SAVESTATE_THUMBNAIL_ENABLE;
             bool_entries[8].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[9].target         = &settings->bools.savefiles_in_content_dir;
             bool_entries[9].name_enum_idx  = MENU_ENUM_LABEL_SAVEFILES_IN_CONTENT_DIR_ENABLE;
             bool_entries[9].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SAVEFILES_IN_CONTENT_DIR_ENABLE;
-            bool_entries[9].default_value  = default_savefiles_in_content_dir;
+            bool_entries[9].default_value  = DEFAULT_SAVEFILES_IN_CONTENT_DIR;
             bool_entries[9].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[10].target         = &settings->bools.savestates_in_content_dir;
             bool_entries[10].name_enum_idx  = MENU_ENUM_LABEL_SAVESTATES_IN_CONTENT_DIR_ENABLE;
             bool_entries[10].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SAVESTATES_IN_CONTENT_DIR_ENABLE;
-            bool_entries[10].default_value  = default_savestates_in_content_dir;
+            bool_entries[10].default_value  = DEFAULT_SAVESTATES_IN_CONTENT_DIR;
             bool_entries[10].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[11].target         = &settings->bools.systemfiles_in_content_dir;
             bool_entries[11].name_enum_idx  = MENU_ENUM_LABEL_SYSTEMFILES_IN_CONTENT_DIR_ENABLE;
             bool_entries[11].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SYSTEMFILES_IN_CONTENT_DIR_ENABLE;
-            bool_entries[11].default_value  = default_systemfiles_in_content_dir;
+            bool_entries[11].default_value  = DEFAULT_SYSTEMFILES_IN_CONTENT_DIR;
             bool_entries[11].flags          = SD_FLAG_ADVANCED;
 
             bool_entries[12].target         = &settings->bools.screenshots_in_content_dir;
             bool_entries[12].name_enum_idx  = MENU_ENUM_LABEL_SCREENSHOTS_IN_CONTENT_DIR_ENABLE;
             bool_entries[12].SHORT_enum_idx = MENU_ENUM_LABEL_VALUE_SCREENSHOTS_IN_CONTENT_DIR_ENABLE;
-            bool_entries[12].default_value  = default_screenshots_in_content_dir;
+            bool_entries[12].default_value  = DEFAULT_SCREENSHOTS_IN_CONTENT_DIR;
             bool_entries[12].flags          = SD_FLAG_ADVANCED;
 
             for (i = 0; i < ARRAY_SIZE(bool_entries); i++)
@@ -10733,7 +11082,7 @@ static bool setting_append_list(
                   &settings->bools.savestate_auto_index,
                   MENU_ENUM_LABEL_SAVESTATE_AUTO_INDEX,
                   MENU_ENUM_LABEL_VALUE_SAVESTATE_AUTO_INDEX,
-                  savestate_auto_index,
+                  DEFAULT_SAVESTATE_AUTO_INDEX,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -12009,20 +12358,20 @@ static bool setting_append_list(
 
             if (video_driver_has_windowed())
             {
-               CONFIG_FLOAT(
+               CONFIG_UINT(
                      list, list_info,
-                     &settings->floats.video_scale,
+                     &settings->uints.video_scale,
                      MENU_ENUM_LABEL_VIDEO_SCALE,
                      MENU_ENUM_LABEL_VALUE_VIDEO_SCALE,
                      DEFAULT_SCALE,
-                     "%.1fx",
                      &group_info,
                      &subgroup_info,
                      parent_group,
                      general_write_handler,
                      general_read_handler);
                (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
-               menu_settings_list_current_add_range(list, list_info, 1.0, 10.0, 1.0, true, true);
+               (*list)[list_info->index - 1].offset_by = 1;
+               menu_settings_list_current_add_range(list, list_info, 1, 10, 1, true, true);
                SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
 
                CONFIG_UINT(
@@ -12782,23 +13131,33 @@ static bool setting_append_list(
                   );
 
 #if !defined(RARCH_MOBILE)
-            if (video_driver_test_all_flags(GFX_CTX_FLAGS_BLACK_FRAME_INSERTION))
             {
+#if defined(HAVE_STEAM) && defined(HAVE_MIST)
+               bool on_deck = false;
+               mist_steam_utils_is_steam_running_on_steam_deck(&on_deck);
+               /* We want to not expose Black Frame Insertion on Steam Deck
+                * for safety reasons */
+               if (!on_deck && video_driver_test_all_flags(GFX_CTX_FLAGS_BLACK_FRAME_INSERTION))
+#else
+               if (video_driver_test_all_flags(GFX_CTX_FLAGS_BLACK_FRAME_INSERTION))
+#endif
+               {
 
-               CONFIG_UINT(
-                     list, list_info,
-                     &settings->uints.video_black_frame_insertion,
-                     MENU_ENUM_LABEL_VIDEO_BLACK_FRAME_INSERTION,
-                     MENU_ENUM_LABEL_VALUE_VIDEO_BLACK_FRAME_INSERTION,
-                     DEFAULT_BLACK_FRAME_INSERTION,
-                     &group_info,
-                     &subgroup_info,
-                     parent_group,
-                     general_write_handler,
-                     general_read_handler);
-               (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
-               menu_settings_list_current_add_range(list, list_info, 0, 5, 1, true, true);
-            }  
+                  CONFIG_UINT(
+                        list, list_info,
+                        &settings->uints.video_black_frame_insertion,
+                        MENU_ENUM_LABEL_VIDEO_BLACK_FRAME_INSERTION,
+                        MENU_ENUM_LABEL_VALUE_VIDEO_BLACK_FRAME_INSERTION,
+                        DEFAULT_BLACK_FRAME_INSERTION,
+                        &group_info,
+                        &subgroup_info,
+                        parent_group,
+                        general_write_handler,
+                        general_read_handler);
+                  (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+                  menu_settings_list_current_add_range(list, list_info, 0, 5, 1, true, true);
+               }  
+            }
 #endif
             END_SUB_GROUP(list, list_info, parent_group);
             START_SUB_GROUP(
@@ -12991,7 +13350,7 @@ static bool setting_append_list(
                &settings->bools.audio_enable_menu,
                MENU_ENUM_LABEL_AUDIO_ENABLE_MENU,
                MENU_ENUM_LABEL_VALUE_AUDIO_ENABLE_MENU,
-               audio_enable_menu,
+               DEFAULT_AUDIO_ENABLE_MENU,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -13007,7 +13366,7 @@ static bool setting_append_list(
                &settings->bools.audio_enable_menu_ok,
                MENU_ENUM_LABEL_MENU_SOUND_OK,
                MENU_ENUM_LABEL_VALUE_MENU_SOUND_OK,
-               audio_enable_menu_ok,
+               DEFAULT_AUDIO_ENABLE_MENU_OK,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -13023,7 +13382,7 @@ static bool setting_append_list(
                &settings->bools.audio_enable_menu_cancel,
                MENU_ENUM_LABEL_MENU_SOUND_CANCEL,
                MENU_ENUM_LABEL_VALUE_MENU_SOUND_CANCEL,
-               audio_enable_menu_cancel,
+               DEFAULT_AUDIO_ENABLE_MENU_CANCEL,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -13039,7 +13398,7 @@ static bool setting_append_list(
                &settings->bools.audio_enable_menu_notice,
                MENU_ENUM_LABEL_MENU_SOUND_NOTICE,
                MENU_ENUM_LABEL_VALUE_MENU_SOUND_NOTICE,
-               audio_enable_menu_notice,
+               DEFAULT_AUDIO_ENABLE_MENU_NOTICE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -13055,7 +13414,23 @@ static bool setting_append_list(
                &settings->bools.audio_enable_menu_bgm,
                MENU_ENUM_LABEL_MENU_SOUND_BGM,
                MENU_ENUM_LABEL_VALUE_MENU_SOUND_BGM,
-               audio_enable_menu_bgm,
+               DEFAULT_AUDIO_ENABLE_MENU_BGM,
+               MENU_ENUM_LABEL_VALUE_OFF,
+               MENU_ENUM_LABEL_VALUE_ON,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler,
+               SD_FLAG_NONE
+               );
+
+         CONFIG_BOOL(
+               list, list_info,
+               &settings->bools.audio_enable_menu_scroll,
+               MENU_ENUM_LABEL_MENU_SOUND_SCROLL,
+               MENU_ENUM_LABEL_VALUE_MENU_SOUND_SCROLL,
+               DEFAULT_AUDIO_ENABLE_MENU_SCROLL,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -13226,7 +13601,7 @@ static bool setting_append_list(
                &settings->uints.audio_resampler_quality,
                MENU_ENUM_LABEL_AUDIO_RESAMPLER_QUALITY,
                MENU_ENUM_LABEL_VALUE_AUDIO_RESAMPLER_QUALITY,
-               audio_resampler_quality_level,
+               DEFAULT_AUDIO_RESAMPLER_QUALITY_LEVEL,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -13433,7 +13808,7 @@ static bool setting_append_list(
                   &settings->uints.input_max_users,
                   MENU_ENUM_LABEL_INPUT_MAX_USERS,
                   MENU_ENUM_LABEL_VALUE_INPUT_MAX_USERS,
-                  input_max_users,
+                  DEFAULT_INPUT_MAX_USERS,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -13467,6 +13842,38 @@ static bool setting_append_list(
 
             CONFIG_BOOL(
                   list, list_info,
+                  &settings->bools.menu_disable_info_button,
+                  MENU_ENUM_LABEL_INPUT_DISABLE_INFO_BUTTON,
+                  MENU_ENUM_LABEL_VALUE_INPUT_DISABLE_INFO_BUTTON,
+                  false,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_ADVANCED
+                  );
+
+            CONFIG_BOOL(
+                  list, list_info,
+                  &settings->bools.menu_disable_search_button,
+                  MENU_ENUM_LABEL_INPUT_DISABLE_SEARCH_BUTTON,
+                  MENU_ENUM_LABEL_VALUE_INPUT_DISABLE_SEARCH_BUTTON,
+                  false,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_ADVANCED
+                  );
+
+            CONFIG_BOOL(
+                  list, list_info,
                   &settings->bools.quit_press_twice,
                   MENU_ENUM_LABEL_QUIT_PRESS_TWICE,
                   MENU_ENUM_LABEL_VALUE_QUIT_PRESS_TWICE,
@@ -13486,7 +13893,7 @@ static bool setting_append_list(
                   &settings->bools.vibrate_on_keypress,
                   MENU_ENUM_LABEL_VIBRATE_ON_KEYPRESS,
                   MENU_ENUM_LABEL_VALUE_VIBRATE_ON_KEYPRESS,
-                  vibrate_on_keypress,
+                  DEFAULT_VIBRATE_ON_KEYPRESS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13502,7 +13909,7 @@ static bool setting_append_list(
                   &settings->bools.enable_device_vibration,
                   MENU_ENUM_LABEL_ENABLE_DEVICE_VIBRATION,
                   MENU_ENUM_LABEL_VALUE_ENABLE_DEVICE_VIBRATION,
-                  enable_device_vibration,
+                  DEFAULT_ENABLE_DEVICE_VIBRATION,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13534,7 +13941,7 @@ static bool setting_append_list(
                   &settings->uints.input_poll_type_behavior,
                   MENU_ENUM_LABEL_INPUT_POLL_TYPE_BEHAVIOR,
                   MENU_ENUM_LABEL_VALUE_INPUT_POLL_TYPE_BEHAVIOR,
-                  input_poll_type_behavior,
+                  DEFAULT_INPUT_POLL_TYPE_BEHAVIOR,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -13585,7 +13992,7 @@ static bool setting_append_list(
                   &settings->bools.input_backtouch_enable,
                   MENU_ENUM_LABEL_INPUT_TOUCH_ENABLE,
                   MENU_ENUM_LABEL_VALUE_INPUT_TOUCH_ENABLE,
-                  input_backtouch_enable,
+                  DEFAULT_INPUT_BACKTOUCH_ENABLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13601,7 +14008,7 @@ static bool setting_append_list(
                   &settings->bools.input_backtouch_toggle,
                   MENU_ENUM_LABEL_INPUT_PREFER_FRONT_TOUCH,
                   MENU_ENUM_LABEL_VALUE_INPUT_PREFER_FRONT_TOUCH,
-                  input_backtouch_toggle,
+                  DEFAULT_INPUT_BACKTOUCH_TOGGLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13731,6 +14138,22 @@ static bool setting_append_list(
 
             CONFIG_BOOL(
                   list, list_info,
+                  &settings->bools.input_menu_swap_scroll_buttons,
+                  MENU_ENUM_LABEL_MENU_INPUT_SWAP_SCROLL,
+                  MENU_ENUM_LABEL_VALUE_MENU_INPUT_SWAP_SCROLL,
+                  DEFAULT_MENU_SWAP_SCROLL_BUTTONS,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_NONE
+                  );
+
+            CONFIG_BOOL(
+                  list, list_info,
                   &settings->bools.input_all_users_control_menu,
                   MENU_ENUM_LABEL_INPUT_ALL_USERS_CONTROL_MENU,
                   MENU_ENUM_LABEL_VALUE_INPUT_ALL_USERS_CONTROL_MENU,
@@ -13766,7 +14189,7 @@ static bool setting_append_list(
                   &settings->bools.input_autodetect_enable,
                   MENU_ENUM_LABEL_INPUT_AUTODETECT_ENABLE,
                   MENU_ENUM_LABEL_VALUE_INPUT_AUTODETECT_ENABLE,
-                  input_autodetect_enable,
+                  DEFAULT_INPUT_AUTODETECT_ENABLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13843,6 +14266,24 @@ static bool setting_append_list(
                   general_read_handler,
                   SD_FLAG_NONE
                   );
+
+        input_driver_state_t *st = input_state_get_ptr();
+        input_driver_t *current_input = st->current_driver;
+        if (string_is_equal(current_input->ident, "android"))
+        {
+            CONFIG_ACTION(
+                  list, list_info,
+                  MENU_ENUM_LABEL_INPUT_SELECT_PHYSICAL_KEYBOARD,
+                  MENU_ENUM_LABEL_VALUE_INPUT_SELECT_PHYSICAL_KEYBOARD,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group);
+            (*list)[list_info->index - 1].action_ok                   = &setting_action_ok_select_physical_keyboard;
+            (*list)[list_info->index - 1].read_handler                = &general_read_handler;
+            (*list)[list_info->index - 1].change_handler               = &general_write_handler;
+            (*list)[list_info->index - 1].get_string_representation   = &setting_get_string_representation_android_physical_keyboard;
+            (*list)[list_info->index - 1].default_value.string        = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NONE);
+        }
 #endif
 
             CONFIG_UINT(
@@ -13861,13 +14302,29 @@ static bool setting_append_list(
                (*list)[list_info->index - 1].get_string_representation =
                   &setting_get_string_representation_uint_input_auto_game_focus;
             menu_settings_list_current_add_range(list, list_info, 0, AUTO_GAME_FOCUS_LAST-1, 1, true, true);
+
+            CONFIG_BOOL(
+                  list, list_info,
+                  &settings->bools.pause_on_disconnect,
+                  MENU_ENUM_LABEL_PAUSE_ON_DISCONNECT,
+                  MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
+                  DEFAULT_PAUSE_ON_DISCONNECT,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_NONE);
+
 #if 0
             CONFIG_BOOL(
                   list, list_info,
                   &settings->bools.input_descriptor_label_show,
                   MENU_ENUM_LABEL_INPUT_DESCRIPTOR_LABEL_SHOW,
                   MENU_ENUM_LABEL_VALUE_INPUT_DESCRIPTOR_LABEL_SHOW,
-                  true,
+                  DEFAULT_INPUT_DESCRIPTOR_LABEL_SHOW,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13883,7 +14340,7 @@ static bool setting_append_list(
                   &settings->bools.input_descriptor_hide_unbound,
                   MENU_ENUM_LABEL_INPUT_DESCRIPTOR_HIDE_UNBOUND,
                   MENU_ENUM_LABEL_VALUE_INPUT_DESCRIPTOR_HIDE_UNBOUND,
-                  input_descriptor_hide_unbound,
+                  DEFAULT_INPUT_DESCRIPTOR_HIDE_UNBOUND,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -13956,7 +14413,7 @@ static bool setting_append_list(
                   &settings->uints.input_bind_timeout,
                   MENU_ENUM_LABEL_INPUT_BIND_TIMEOUT,
                   MENU_ENUM_LABEL_VALUE_INPUT_BIND_TIMEOUT,
-                  input_bind_timeout,
+                  DEFAULT_INPUT_BIND_TIMEOUT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -13972,7 +14429,7 @@ static bool setting_append_list(
                   &settings->uints.input_bind_hold,
                   MENU_ENUM_LABEL_INPUT_BIND_HOLD,
                   MENU_ENUM_LABEL_VALUE_INPUT_BIND_HOLD,
-                  input_bind_hold,
+                  DEFAULT_INPUT_BIND_HOLD,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -14065,7 +14522,7 @@ static bool setting_append_list(
                &settings->uints.input_turbo_period,
                MENU_ENUM_LABEL_INPUT_TURBO_PERIOD,
                MENU_ENUM_LABEL_VALUE_INPUT_TURBO_PERIOD,
-               turbo_period,
+               DEFAULT_TURBO_PERIOD,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14081,7 +14538,7 @@ static bool setting_append_list(
                &settings->uints.input_turbo_duty_cycle,
                MENU_ENUM_LABEL_INPUT_DUTY_CYCLE,
                MENU_ENUM_LABEL_VALUE_INPUT_DUTY_CYCLE,
-               turbo_duty_cycle,
+               DEFAULT_TURBO_DUTY_CYCLE,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14097,7 +14554,7 @@ static bool setting_append_list(
                &settings->uints.input_turbo_mode,
                MENU_ENUM_LABEL_INPUT_TURBO_MODE,
                MENU_ENUM_LABEL_VALUE_INPUT_TURBO_MODE,
-               turbo_mode,
+               DEFAULT_TURBO_MODE,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14114,7 +14571,7 @@ static bool setting_append_list(
                &settings->uints.input_turbo_default_button,
                MENU_ENUM_LABEL_INPUT_TURBO_DEFAULT_BUTTON,
                MENU_ENUM_LABEL_VALUE_INPUT_TURBO_DEFAULT_BUTTON,
-               turbo_default_btn,
+               DEFAULT_TURBO_DEFAULT_BTN,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14446,6 +14903,7 @@ static bool setting_append_list(
          (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
          menu_settings_list_current_add_range(list, list_info, 1, 10, 0.1, true, true);
 
+#ifdef HAVE_RUNAHEAD
          CONFIG_BOOL(
                list, list_info,
                &settings->bools.run_ahead_enabled,
@@ -14461,9 +14919,7 @@ static bool setting_append_list(
                general_read_handler,
                SD_FLAG_NONE
                );
-         (*list)[list_info->index - 1].action_ok     = setting_bool_action_left_with_refresh;
-         (*list)[list_info->index - 1].action_left   = setting_bool_action_left_with_refresh;
-         (*list)[list_info->index - 1].action_right  = setting_bool_action_right_with_refresh;
+         (*list)[list_info->index - 1].change_handler = runahead_change_handler;
 
          CONFIG_UINT(
             list, list_info,
@@ -14479,7 +14935,8 @@ static bool setting_append_list(
          (*list)[list_info->index - 1].ui_type   = ST_UI_TYPE_UINT_COMBOBOX;
          (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
          (*list)[list_info->index - 1].offset_by = 1;
-         menu_settings_list_current_add_range(list, list_info, 1, 12, 1, true, true);
+         (*list)[list_info->index - 1].change_handler = runahead_change_handler;
+         menu_settings_list_current_add_range(list, list_info, 1, MAX_RUNAHEAD_FRAMES, 1, true, true);
 
 #if defined(HAVE_DYNAMIC) || defined(HAVE_DYLIB)
          CONFIG_BOOL(
@@ -14497,6 +14954,7 @@ static bool setting_append_list(
                general_read_handler,
                SD_FLAG_NONE
                );
+         (*list)[list_info->index - 1].change_handler = runahead_change_handler;
 #endif
 
          CONFIG_BOOL(
@@ -14514,6 +14972,56 @@ static bool setting_append_list(
                general_read_handler,
                SD_FLAG_ADVANCED
                );
+
+         CONFIG_BOOL(
+               list, list_info,
+               &settings->bools.preemptive_frames_enable,
+               MENU_ENUM_LABEL_PREEMPT_ENABLE,
+               MENU_ENUM_LABEL_VALUE_PREEMPT_ENABLE,
+               false,
+               MENU_ENUM_LABEL_VALUE_OFF,
+               MENU_ENUM_LABEL_VALUE_ON,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler,
+               SD_FLAG_NONE);
+         (*list)[list_info->index - 1].change_handler = preempt_change_handler;
+
+         CONFIG_UINT(
+               list, list_info,
+               &settings->uints.run_ahead_frames,
+               MENU_ENUM_LABEL_PREEMPT_FRAMES,
+               MENU_ENUM_LABEL_VALUE_PREEMPT_FRAMES,
+               1,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler);
+         (*list)[list_info->index - 1].ui_type   = ST_UI_TYPE_UINT_COMBOBOX;
+         (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+         (*list)[list_info->index - 1].offset_by = 1;
+         (*list)[list_info->index - 1].change_handler = preempt_change_handler;
+         menu_settings_list_current_add_range(list, list_info, 1, MAX_RUNAHEAD_FRAMES, 1, true, true);
+
+         CONFIG_BOOL(
+               list, list_info,
+               &settings->bools.preemptive_frames_hide_warnings,
+               MENU_ENUM_LABEL_PREEMPT_HIDE_WARNINGS,
+               MENU_ENUM_LABEL_VALUE_PREEMPT_HIDE_WARNINGS,
+               DEFAULT_PREEMPT_HIDE_WARNINGS,
+               MENU_ENUM_LABEL_VALUE_OFF,
+               MENU_ENUM_LABEL_VALUE_ON,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler,
+               SD_FLAG_ADVANCED
+               );
+#endif
 
 #ifdef ANDROID
          CONFIG_UINT(
@@ -14705,7 +15213,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_pos_x,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_POS_X,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_POS_X,
-               message_pos_offset_x,
+               DEFAULT_MESSAGE_POS_OFFSET_X,
                "%.3f",
                &group_info,
                &subgroup_info,
@@ -14720,7 +15228,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_pos_y,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_POS_Y,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_POS_Y,
-               message_pos_offset_y,
+               DEFAULT_MESSAGE_POS_OFFSET_Y,
                "%.3f",
                &group_info,
                &subgroup_info,
@@ -14735,7 +15243,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_color_r,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_COLOR_RED,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_COLOR_RED,
-               ((message_color >> 16) & 0xff) / 255.0f,
+               ((DEFAULT_MESSAGE_COLOR >> 16) & 0xff) / 255.0f,
                "%.3f",
                &group_info,
                &subgroup_info,
@@ -14754,7 +15262,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_color_g,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_COLOR_GREEN,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_COLOR_GREEN,
-               ((message_color >> 8) & 0xff) / 255.0f,
+               ((DEFAULT_MESSAGE_COLOR >> 8) & 0xff) / 255.0f,
                "%.3f",
                &group_info,
                &subgroup_info,
@@ -14770,7 +15278,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_color_b,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_COLOR_BLUE,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_COLOR_BLUE,
-               ((message_color >> 0) & 0xff) / 255.0f,
+               ((DEFAULT_MESSAGE_COLOR >> 0) & 0xff) / 255.0f,
                "%.3f",
                &group_info,
                &subgroup_info,
@@ -14786,7 +15294,7 @@ static bool setting_append_list(
                &settings->bools.video_msg_bgcolor_enable,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_BGCOLOR_ENABLE,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_BGCOLOR_ENABLE,
-               message_bgcolor_enable,
+               DEFAULT_MESSAGE_BGCOLOR_ENABLE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -14805,7 +15313,7 @@ static bool setting_append_list(
                &settings->uints.video_msg_bgcolor_red,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_BGCOLOR_RED,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_BGCOLOR_RED,
-               message_bgcolor_red,
+               DEFAULT_MESSAGE_BGCOLOR_RED,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14818,7 +15326,7 @@ static bool setting_append_list(
                &settings->uints.video_msg_bgcolor_green,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_BGCOLOR_GREEN,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_BGCOLOR_GREEN,
-               message_bgcolor_green,
+               DEFAULT_MESSAGE_BGCOLOR_GREEN,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14831,7 +15339,7 @@ static bool setting_append_list(
                &settings->uints.video_msg_bgcolor_blue,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_BGCOLOR_BLUE,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_BGCOLOR_BLUE,
-               message_bgcolor_blue,
+               DEFAULT_MESSAGE_BGCOLOR_BLUE,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -14845,7 +15353,7 @@ static bool setting_append_list(
                &settings->floats.video_msg_bgcolor_opacity,
                MENU_ENUM_LABEL_VIDEO_MESSAGE_BGCOLOR_OPACITY,
                MENU_ENUM_LABEL_VALUE_VIDEO_MESSAGE_BGCOLOR_OPACITY,
-               message_bgcolor_opacity,
+               DEFAULT_MESSAGE_BGCOLOR_OPACITY,
                "%.2f",
                &group_info,
                &subgroup_info,
@@ -15423,6 +15931,44 @@ static bool setting_append_list(
          menu_settings_list_current_add_range(list, list_info, 0, 1, 0.01, true, true);
          SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_CMD_APPLY_AUTO);
 
+         CONFIG_UINT(
+               list, list_info,
+               &settings->uints.input_overlay_dpad_diagonal_sensitivity,
+               MENU_ENUM_LABEL_INPUT_OVERLAY_DPAD_DIAGONAL_SENSITIVITY,
+               MENU_ENUM_LABEL_VALUE_INPUT_OVERLAY_DPAD_DIAGONAL_SENSITIVITY,
+               DEFAULT_OVERLAY_DPAD_DIAGONAL_SENSITIVITY,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler
+               );
+         (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+         (*list)[list_info->index - 1].get_string_representation =
+               &setting_get_string_representation_percentage;
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_OVERLAY_SET_EIGHTWAY_DIAGONAL_SENSITIVITY);
+         menu_settings_list_current_add_range(list, list_info, 0, 100, 1, true, true);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_CMD_APPLY_AUTO);
+
+         CONFIG_UINT(
+               list, list_info,
+               &settings->uints.input_overlay_abxy_diagonal_sensitivity,
+               MENU_ENUM_LABEL_INPUT_OVERLAY_ABXY_DIAGONAL_SENSITIVITY,
+               MENU_ENUM_LABEL_VALUE_INPUT_OVERLAY_ABXY_DIAGONAL_SENSITIVITY,
+               DEFAULT_OVERLAY_ABXY_DIAGONAL_SENSITIVITY,
+               &group_info,
+               &subgroup_info,
+               parent_group,
+               general_write_handler,
+               general_read_handler
+               );
+         (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+         (*list)[list_info->index - 1].get_string_representation =
+               &setting_get_string_representation_percentage;
+         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_OVERLAY_SET_EIGHTWAY_DIAGONAL_SENSITIVITY);
+         menu_settings_list_current_add_range(list, list_info, 0, 100, 1, true, true);
+         SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_CMD_APPLY_AUTO);
+
          CONFIG_FLOAT(
                list, list_info,
                &settings->floats.input_overlay_scale_landscape,
@@ -15712,7 +16258,7 @@ static bool setting_append_list(
                   sizeof(settings->paths.path_menu_wallpaper),
                   MENU_ENUM_LABEL_MENU_WALLPAPER,
                   MENU_ENUM_LABEL_VALUE_MENU_WALLPAPER,
-                  "",
+                  settings->paths.directory_assets,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -15725,7 +16271,7 @@ static bool setting_append_list(
                   &settings->floats.menu_wallpaper_opacity,
                   MENU_ENUM_LABEL_MENU_WALLPAPER_OPACITY,
                   MENU_ENUM_LABEL_VALUE_MENU_WALLPAPER_OPACITY,
-                  menu_wallpaper_opacity,
+                  DEFAULT_MENU_WALLPAPER_OPACITY,
                   "%.3f",
                   &group_info,
                   &subgroup_info,
@@ -15744,7 +16290,7 @@ static bool setting_append_list(
                   &settings->floats.menu_framebuffer_opacity,
                   MENU_ENUM_LABEL_MENU_FRAMEBUFFER_OPACITY,
                   MENU_ENUM_LABEL_VALUE_MENU_FRAMEBUFFER_OPACITY,
-                  menu_framebuffer_opacity,
+                  DEFAULT_MENU_FRAMEBUFFER_OPACITY,
                   "%.3f",
                   &group_info,
                   &subgroup_info,
@@ -15763,7 +16309,7 @@ static bool setting_append_list(
                   &settings->bools.menu_dynamic_wallpaper_enable,
                   MENU_ENUM_LABEL_DYNAMIC_WALLPAPER,
                   MENU_ENUM_LABEL_VALUE_DYNAMIC_WALLPAPER,
-                  menu_dynamic_wallpaper_enable,
+                  DEFAULT_MENU_DYNAMIC_WALLPAPER_ENABLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -15799,7 +16345,7 @@ static bool setting_append_list(
                &settings->bools.menu_savestate_resume,
                MENU_ENUM_LABEL_MENU_SAVESTATE_RESUME,
                MENU_ENUM_LABEL_VALUE_MENU_SAVESTATE_RESUME,
-               menu_savestate_resume,
+               DEFAULT_MENU_SAVESTATE_RESUME,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -15898,6 +16444,30 @@ static bool setting_append_list(
             menu_settings_list_current_add_range(list, list_info, 0.1, 10.0, 0.1, true, true);
          }
 #endif
+#if defined(HAVE_XMB) || defined(HAVE_OZONE)
+         if (string_is_equal(settings->arrays.menu_driver, "xmb")  ||
+             string_is_equal(settings->arrays.menu_driver, "ozone"))
+         {
+            CONFIG_UINT(
+                  list, list_info,
+                  &settings->uints.menu_remember_selection,
+                  MENU_ENUM_LABEL_MENU_REMEMBER_SELECTION,
+                  MENU_ENUM_LABEL_VALUE_MENU_REMEMBER_SELECTION,
+                  DEFAULT_MENU_REMEMBER_SELECTION,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler);
+            (*list)[list_info->index - 1].action_ok    = &setting_action_ok_uint;
+            (*list)[list_info->index - 1].action_left  = &setting_uint_action_left_with_refresh;
+            (*list)[list_info->index - 1].action_right = &setting_uint_action_right_with_refresh;
+            (*list)[list_info->index - 1].get_string_representation =
+                  &setting_get_string_representation_uint_menu_remember_selection;
+            menu_settings_list_current_add_range(list, list_info, 0, MENU_REMEMBER_SELECTION_LAST-1, 1, true, true);
+            (*list)[list_info->index - 1].ui_type      = ST_UI_TYPE_UINT_COMBOBOX;
+         }
+#endif
          CONFIG_BOOL(
                list, list_info,
                &settings->bools.menu_mouse_enable,
@@ -15985,7 +16555,7 @@ static bool setting_append_list(
                   &settings->bools.menu_rgui_full_width_layout,
                   MENU_ENUM_LABEL_MENU_RGUI_FULL_WIDTH_LAYOUT,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_FULL_WIDTH_LAYOUT,
-                  rgui_full_width_layout,
+                  DEFAULT_RGUI_FULL_WIDTH_LAYOUT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16018,7 +16588,7 @@ static bool setting_append_list(
                      &settings->uints.menu_rgui_internal_upscale_level,
                      MENU_ENUM_LABEL_MENU_RGUI_INTERNAL_UPSCALE_LEVEL,
                      MENU_ENUM_LABEL_VALUE_MENU_RGUI_INTERNAL_UPSCALE_LEVEL,
-                     rgui_internal_upscale_level,
+                     DEFAULT_RGUI_INTERNAL_UPSCALE_LEVEL,
                      &group_info,
                      &subgroup_info,
                      parent_group,
@@ -16038,7 +16608,7 @@ static bool setting_append_list(
                   &settings->uints.menu_rgui_aspect_ratio,
                   MENU_ENUM_LABEL_MENU_RGUI_ASPECT_RATIO,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_ASPECT_RATIO,
-                  rgui_aspect,
+                  DEFAULT_RGUI_ASPECT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16054,7 +16624,7 @@ static bool setting_append_list(
                   &settings->uints.menu_rgui_aspect_ratio_lock,
                   MENU_ENUM_LABEL_MENU_RGUI_ASPECT_RATIO_LOCK,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_ASPECT_RATIO_LOCK,
-                  rgui_aspect_lock,
+                  DEFAULT_RGUI_ASPECT_LOCK,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16131,7 +16701,7 @@ static bool setting_append_list(
                   &settings->bools.menu_rgui_shadows,
                   MENU_ENUM_LABEL_MENU_RGUI_SHADOWS,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_SHADOWS,
-                  rgui_shadows,
+                  DEFAULT_RGUI_SHADOWS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16146,7 +16716,7 @@ static bool setting_append_list(
                   &settings->uints.menu_rgui_particle_effect,
                   MENU_ENUM_LABEL_MENU_RGUI_PARTICLE_EFFECT,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_PARTICLE_EFFECT,
-                  rgui_particle_effect,
+                  DEFAULT_RGUI_PARTICLE_EFFECT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16195,7 +16765,7 @@ static bool setting_append_list(
                   &settings->bools.menu_rgui_extended_ascii,
                   MENU_ENUM_LABEL_MENU_RGUI_EXTENDED_ASCII,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_EXTENDED_ASCII,
-                  rgui_extended_ascii,
+                  DEFAULT_RGUI_EXTENDED_ASCII,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16325,7 +16895,7 @@ static bool setting_append_list(
                &settings->floats.menu_ticker_speed,
                MENU_ENUM_LABEL_MENU_TICKER_SPEED,
                MENU_ENUM_LABEL_VALUE_MENU_TICKER_SPEED,
-               menu_ticker_speed,
+               DEFAULT_MENU_TICKER_SPEED,
                "%.1fx",
                &group_info,
                &subgroup_info,
@@ -16478,7 +17048,7 @@ static bool setting_append_list(
                   &settings->uints.menu_xmb_alpha_factor,
                   MENU_ENUM_LABEL_XMB_ALPHA_FACTOR,
                   MENU_ENUM_LABEL_VALUE_XMB_ALPHA_FACTOR,
-                  xmb_alpha_factor,
+                  DEFAULT_XMB_ALPHA_FACTOR,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16505,9 +17075,24 @@ static bool setting_append_list(
             menu_settings_list_current_add_range(list, list_info, 0, 500, 1, true, true);
             SETTINGS_DATA_LIST_CURRENT_ADD_FLAGS(list, list_info, SD_FLAG_LAKKA_ADVANCED);
 
-            CONFIG_UINT(
+            CONFIG_BOOL(
                   list, list_info,
-                  &settings->uints.menu_xmb_title_margin,
+                  &settings->bools.menu_xmb_show_title_header,
+                  MENU_ENUM_LABEL_MENU_XMB_SHOW_TITLE_HEADER,
+                  MENU_ENUM_LABEL_VALUE_MENU_XMB_SHOW_TITLE_HEADER,
+                  DEFAULT_XMB_SHOW_TITLE_HEADER,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_NONE);
+
+            CONFIG_INT(
+                  list, list_info,
+                  &settings->ints.menu_xmb_title_margin,
                   MENU_ENUM_LABEL_MENU_XMB_TITLE_MARGIN,
                   MENU_ENUM_LABEL_VALUE_MENU_XMB_TITLE_MARGIN,
                   DEFAULT_XMB_TITLE_MARGIN,
@@ -16517,7 +17102,23 @@ static bool setting_append_list(
                   general_write_handler,
                   general_read_handler);
             (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
-            menu_settings_list_current_add_range(list, list_info, 0, 12, 1, true, true);
+            (*list)[list_info->index - 1].offset_by = -MAXIMUM_XMB_TITLE_MARGIN;
+            menu_settings_list_current_add_range(list, list_info, -MAXIMUM_XMB_TITLE_MARGIN, MAXIMUM_XMB_TITLE_MARGIN, 1, true, true);
+
+            CONFIG_INT(
+                  list, list_info,
+                  &settings->ints.menu_xmb_title_margin_horizontal_offset,
+                  MENU_ENUM_LABEL_MENU_XMB_TITLE_MARGIN_HORIZONTAL_OFFSET,
+                  MENU_ENUM_LABEL_VALUE_MENU_XMB_TITLE_MARGIN_HORIZONTAL_OFFSET,
+                  DEFAULT_XMB_TITLE_MARGIN_HORIZONTAL_OFFSET,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler);
+            (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+            (*list)[list_info->index - 1].offset_by = -MAXIMUM_XMB_TITLE_MARGIN;
+            menu_settings_list_current_add_range(list, list_info, -MAXIMUM_XMB_TITLE_MARGIN, MAXIMUM_XMB_TITLE_MARGIN, 1, true, true);
 
             CONFIG_PATH(
                   list, list_info,
@@ -16541,7 +17142,7 @@ static bool setting_append_list(
                   &settings->uints.menu_font_color_red,
                   MENU_ENUM_LABEL_MENU_FONT_COLOR_RED,
                   MENU_ENUM_LABEL_VALUE_MENU_FONT_COLOR_RED,
-                  menu_font_color_red,
+                  DEFAULT_MENU_FONT_COLOR_RED,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16556,7 +17157,7 @@ static bool setting_append_list(
                   &settings->uints.menu_font_color_green,
                   MENU_ENUM_LABEL_MENU_FONT_COLOR_GREEN,
                   MENU_ENUM_LABEL_VALUE_MENU_FONT_COLOR_GREEN,
-                  menu_font_color_green,
+                  DEFAULT_MENU_FONT_COLOR_GREEN,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16571,7 +17172,7 @@ static bool setting_append_list(
                   &settings->uints.menu_font_color_blue,
                   MENU_ENUM_LABEL_MENU_FONT_COLOR_BLUE,
                   MENU_ENUM_LABEL_VALUE_MENU_FONT_COLOR_BLUE,
-                  menu_font_color_blue,
+                  DEFAULT_MENU_FONT_COLOR_BLUE,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16586,7 +17187,7 @@ static bool setting_append_list(
                   &settings->uints.menu_xmb_layout,
                   MENU_ENUM_LABEL_XMB_LAYOUT,
                   MENU_ENUM_LABEL_VALUE_XMB_LAYOUT,
-                  xmb_menu_layout,
+                  DEFAULT_XMB_MENU_LAYOUT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16603,7 +17204,7 @@ static bool setting_append_list(
                   &settings->uints.menu_xmb_theme,
                   MENU_ENUM_LABEL_XMB_THEME,
                   MENU_ENUM_LABEL_VALUE_XMB_THEME,
-                  xmb_icon_theme,
+                  DEFAULT_XMB_ICON_THEME,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16614,6 +17215,21 @@ static bool setting_append_list(
             menu_settings_list_current_add_range(list, list_info, 0, XMB_ICON_THEME_LAST - 1, 1, true, true);
             MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_REINIT);
             (*list)[list_info->index - 1].ui_type   = ST_UI_TYPE_UINT_COMBOBOX;
+
+            CONFIG_BOOL(
+                  list, list_info,
+                  &settings->bools.menu_xmb_switch_icons,
+                  MENU_ENUM_LABEL_XMB_SWITCH_ICONS,
+                  MENU_ENUM_LABEL_VALUE_XMB_SWITCH_ICONS,
+                  DEFAULT_XMB_SWITCH_ICONS,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_NONE);
 
             CONFIG_BOOL(
                   list, list_info,
@@ -16659,7 +17275,7 @@ static bool setting_append_list(
                   &settings->uints.menu_xmb_color_theme,
                   MENU_ENUM_LABEL_XMB_MENU_COLOR_THEME,
                   MENU_ENUM_LABEL_VALUE_XMB_MENU_COLOR_THEME,
-                  xmb_theme,
+                  DEFAULT_XMB_THEME,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -16698,7 +17314,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_load_core,
                   MENU_ENUM_LABEL_MENU_SHOW_LOAD_CORE,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_LOAD_CORE,
-                  menu_show_load_core,
+                  DEFAULT_MENU_SHOW_LOAD_CORE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16713,7 +17329,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_load_content,
                   MENU_ENUM_LABEL_MENU_SHOW_LOAD_CONTENT,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_LOAD_CONTENT,
-                  menu_show_load_content,
+                  DEFAULT_MENU_SHOW_LOAD_CONTENT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16729,7 +17345,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_load_disc,
                   MENU_ENUM_LABEL_MENU_SHOW_LOAD_DISC,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_LOAD_DISC,
-                  menu_show_load_disc,
+                  DEFAULT_MENU_SHOW_LOAD_DISC,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16744,7 +17360,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_dump_disc,
                   MENU_ENUM_LABEL_MENU_SHOW_DUMP_DISC,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_DUMP_DISC,
-                  menu_show_dump_disc,
+                  DEFAULT_MENU_SHOW_DUMP_DISC,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16760,7 +17376,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_eject_disc,
                   MENU_ENUM_LABEL_MENU_SHOW_EJECT_DISC,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_EJECT_DISC,
-                  menu_show_eject_disc,
+                  DEFAULT_MENU_SHOW_EJECT_DISC,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16777,7 +17393,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_information,
                   MENU_ENUM_LABEL_MENU_SHOW_INFORMATION,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_INFORMATION,
-                  menu_show_information,
+                  DEFAULT_MENU_SHOW_INFORMATION,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16792,7 +17408,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_configurations,
                   MENU_ENUM_LABEL_MENU_SHOW_CONFIGURATIONS,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_CONFIGURATIONS,
-                  menu_show_configurations,
+                  DEFAULT_MENU_SHOW_CONFIGURATIONS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16807,7 +17423,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_overlays,
                   MENU_ENUM_LABEL_CONTENT_SHOW_OVERLAYS,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_OVERLAYS,
-                  true,
+                  DEFAULT_QUICK_MENU_SHOW_OVERLAYS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16823,7 +17439,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_video_layout,
                   MENU_ENUM_LABEL_CONTENT_SHOW_VIDEO_LAYOUT,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_VIDEO_LAYOUT,
-                  true,
+                  DEFAULT_QUICK_MENU_SHOW_VIDEO_LAYOUT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16839,7 +17455,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_latency,
                   MENU_ENUM_LABEL_CONTENT_SHOW_LATENCY,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_LATENCY,
-                  true,
+                  DEFAULT_QUICK_MENU_SHOW_LATENCY,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16854,7 +17470,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_rewind,
                   MENU_ENUM_LABEL_CONTENT_SHOW_REWIND,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_REWIND,
-                  true,
+                  DEFAULT_QUICK_MENU_SHOW_REWIND,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16869,7 +17485,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_help,
                   MENU_ENUM_LABEL_MENU_SHOW_HELP,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_HELP,
-                  menu_show_help,
+                  DEFAULT_MENU_SHOW_HELP,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16885,7 +17501,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_quit_retroarch,
                   MENU_ENUM_LABEL_MENU_SHOW_QUIT_RETROARCH,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_RESTART_RETROARCH,
-                  menu_show_quit_retroarch,
+                  DEFAULT_MENU_SHOW_RESTART,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16900,7 +17516,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_quit_retroarch,
                   MENU_ENUM_LABEL_MENU_SHOW_QUIT_RETROARCH,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_QUIT_RETROARCH,
-                  menu_show_quit_retroarch,
+                  DEFAULT_MENU_SHOW_QUIT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16917,7 +17533,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_reboot,
                   MENU_ENUM_LABEL_MENU_SHOW_REBOOT,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_REBOOT,
-                  menu_show_reboot,
+                  DEFAULT_MENU_SHOW_REBOOT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16932,7 +17548,7 @@ static bool setting_append_list(
                   &settings->bools.menu_show_shutdown,
                   MENU_ENUM_LABEL_MENU_SHOW_SHUTDOWN,
                   MENU_ENUM_LABEL_VALUE_MENU_SHOW_SHUTDOWN,
-                  menu_show_shutdown,
+                  DEFAULT_MENU_SHOW_SHUTDOWN,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -16949,7 +17565,7 @@ static bool setting_append_list(
                      &settings->bools.menu_show_restart_retroarch,
                      MENU_ENUM_LABEL_MENU_SHOW_RESTART_RETROARCH,
                      MENU_ENUM_LABEL_VALUE_MENU_SHOW_RESTART_RETROARCH,
-                     menu_show_restart_retroarch,
+                     DEFAULT_MENU_SHOW_RESTART,
                      MENU_ENUM_LABEL_VALUE_OFF,
                      MENU_ENUM_LABEL_VALUE_ON,
                      &group_info,
@@ -16969,7 +17585,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_settings,
                   MENU_ENUM_LABEL_CONTENT_SHOW_SETTINGS,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_SETTINGS,
-                  content_show_settings,
+                  DEFAULT_CONTENT_SHOW_SETTINGS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17003,7 +17619,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_favorites,
                   MENU_ENUM_LABEL_CONTENT_SHOW_FAVORITES,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_FAVORITES,
-                  content_show_favorites,
+                  DEFAULT_CONTENT_SHOW_FAVORITES,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17019,7 +17635,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_images,
                   MENU_ENUM_LABEL_CONTENT_SHOW_IMAGES,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_IMAGES,
-                  content_show_images,
+                  DEFAULT_CONTENT_SHOW_IMAGES,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17035,7 +17651,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_music,
                   MENU_ENUM_LABEL_CONTENT_SHOW_MUSIC,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_MUSIC,
-                  content_show_music,
+                  DEFAULT_CONTENT_SHOW_MUSIC,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17051,7 +17667,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_video,
                   MENU_ENUM_LABEL_CONTENT_SHOW_VIDEO,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_VIDEO,
-                  content_show_video,
+                  DEFAULT_CONTENT_SHOW_VIDEO,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17067,7 +17683,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_history,
                   MENU_ENUM_LABEL_CONTENT_SHOW_HISTORY,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_HISTORY,
-                  content_show_history,
+                  DEFAULT_CONTENT_SHOW_HISTORY,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17083,7 +17699,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_netplay,
                   MENU_ENUM_LABEL_CONTENT_SHOW_NETPLAY,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_NETPLAY,
-                  content_show_netplay,
+                  DEFAULT_CONTENT_SHOW_NETPLAY,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17141,7 +17757,7 @@ static bool setting_append_list(
                   &settings->bools.menu_content_show_playlists,
                   MENU_ENUM_LABEL_CONTENT_SHOW_PLAYLISTS,
                   MENU_ENUM_LABEL_VALUE_CONTENT_SHOW_PLAYLISTS,
-                  content_show_playlists,
+                  DEFAULT_CONTENT_SHOW_PLAYLISTS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17207,6 +17823,21 @@ static bool setting_append_list(
             (*list)[list_info->index - 1].action_ok     = &setting_bool_action_left_with_refresh;
             (*list)[list_info->index - 1].action_left   = &setting_bool_action_left_with_refresh;
             (*list)[list_info->index - 1].action_right  = &setting_bool_action_right_with_refresh;
+
+            CONFIG_BOOL(
+                  list, list_info,
+                  &settings->bools.menu_materialui_switch_icons,
+                  MENU_ENUM_LABEL_MATERIALUI_SWITCH_ICONS,
+                  MENU_ENUM_LABEL_VALUE_MATERIALUI_SWITCH_ICONS,
+                  DEFAULT_MATERIALUI_SWITCH_ICONS,
+                  MENU_ENUM_LABEL_VALUE_OFF,
+                  MENU_ENUM_LABEL_VALUE_ON,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group,
+                  general_write_handler,
+                  general_read_handler,
+                  SD_FLAG_NONE);
 
             CONFIG_BOOL(
                   list, list_info,
@@ -17378,7 +18009,7 @@ static bool setting_append_list(
                   &settings->floats.menu_header_opacity,
                   MENU_ENUM_LABEL_MATERIALUI_MENU_HEADER_OPACITY,
                   MENU_ENUM_LABEL_VALUE_MATERIALUI_MENU_HEADER_OPACITY,
-                  menu_header_opacity,
+                  DEFAULT_MENU_HEADER_OPACITY,
                   "%.3f",
                   &group_info,
                   &subgroup_info,
@@ -17393,7 +18024,7 @@ static bool setting_append_list(
                   &settings->floats.menu_footer_opacity,
                   MENU_ENUM_LABEL_MATERIALUI_MENU_FOOTER_OPACITY,
                   MENU_ENUM_LABEL_VALUE_MATERIALUI_MENU_FOOTER_OPACITY,
-                  menu_footer_opacity,
+                  DEFAULT_MENU_FOOTER_OPACITY,
                   "%.3f",
                   &group_info,
                   &subgroup_info,
@@ -17497,7 +18128,7 @@ static bool setting_append_list(
                   &settings->bools.menu_rgui_inline_thumbnails,
                   MENU_ENUM_LABEL_MENU_RGUI_INLINE_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_INLINE_THUMBNAILS,
-                  rgui_inline_thumbnails,
+                  DEFAULT_RGUI_INLINE_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17512,7 +18143,7 @@ static bool setting_append_list(
                   &settings->bools.menu_rgui_swap_thumbnails,
                   MENU_ENUM_LABEL_MENU_RGUI_SWAP_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_SWAP_THUMBNAILS,
-                  rgui_swap_thumbnails,
+                  DEFAULT_RGUI_SWAP_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17557,7 +18188,7 @@ static bool setting_append_list(
                   &settings->uints.gfx_thumbnails,
                   MENU_ENUM_LABEL_THUMBNAILS,
                   thumbnails_label_value,
-                  gfx_thumbnails_default,
+                  DEFAULT_GFX_THUMBNAILS_DEFAULT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17574,7 +18205,7 @@ static bool setting_append_list(
                   &settings->uints.menu_left_thumbnails,
                   MENU_ENUM_LABEL_LEFT_THUMBNAILS,
                   left_thumbnails_label_value,
-                  menu_left_thumbnails_default,
+                  DEFAULT_MENU_LEFT_THUMBNAILS_DEFAULT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17594,7 +18225,7 @@ static bool setting_append_list(
                   &settings->bools.menu_xmb_vertical_thumbnails,
                   MENU_ENUM_LABEL_XMB_VERTICAL_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_XMB_VERTICAL_THUMBNAILS,
-                  xmb_vertical_thumbnails,
+                  DEFAULT_XMB_VERTICAL_THUMBNAILS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -17609,7 +18240,7 @@ static bool setting_append_list(
                   &settings->uints.menu_xmb_thumbnail_scale_factor,
                   MENU_ENUM_LABEL_MENU_XMB_THUMBNAIL_SCALE_FACTOR,
                   MENU_ENUM_LABEL_VALUE_MENU_XMB_THUMBNAIL_SCALE_FACTOR,
-                  xmb_thumbnail_scale_factor,
+                  DEFAULT_XMB_THUMBNAIL_SCALE_FACTOR,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17629,7 +18260,7 @@ static bool setting_append_list(
                   &settings->uints.gfx_thumbnail_upscale_threshold,
                   MENU_ENUM_LABEL_MENU_THUMBNAIL_UPSCALE_THRESHOLD,
                   MENU_ENUM_LABEL_VALUE_MENU_THUMBNAIL_UPSCALE_THRESHOLD,
-                  gfx_thumbnail_upscale_threshold,
+                  DEFAULT_GFX_THUMBNAIL_UPSCALE_THRESHOLD,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17646,7 +18277,7 @@ static bool setting_append_list(
                   &settings->uints.menu_rgui_thumbnail_downscaler,
                   MENU_ENUM_LABEL_MENU_RGUI_THUMBNAIL_DOWNSCALER,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_THUMBNAIL_DOWNSCALER,
-                  rgui_thumbnail_downscaler,
+                  DEFAULT_RGUI_THUMBNAIL_DOWNSCALER,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17663,7 +18294,7 @@ static bool setting_append_list(
                   &settings->uints.menu_rgui_thumbnail_delay,
                   MENU_ENUM_LABEL_MENU_RGUI_THUMBNAIL_DELAY,
                   MENU_ENUM_LABEL_VALUE_MENU_RGUI_THUMBNAIL_DELAY,
-                  rgui_thumbnail_delay,
+                  DEFAULT_RGUI_THUMBNAIL_DELAY,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -17754,7 +18385,7 @@ static bool setting_append_list(
                &settings->bools.menu_show_sublabels,
                MENU_ENUM_LABEL_MENU_SHOW_SUBLABELS,
                MENU_ENUM_LABEL_VALUE_MENU_SHOW_SUBLABELS,
-               menu_show_sublabels,
+               DEFAULT_MENU_SHOW_SUBLABELS,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -17882,7 +18513,7 @@ static bool setting_append_list(
                &settings->bools.sustained_performance_mode,
                MENU_ENUM_LABEL_SUSTAINED_PERFORMANCE_MODE,
                MENU_ENUM_LABEL_VALUE_SUSTAINED_PERFORMANCE_MODE,
-               sustained_performance_mode,
+               DEFAULT_SUSTAINED_PERFORMANCE_MODE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18182,7 +18813,7 @@ static bool setting_append_list(
                   &settings->uints.video_3ds_display_mode,
                   MENU_ENUM_LABEL_VIDEO_3DS_DISPLAY_MODE,
                   MENU_ENUM_LABEL_VALUE_VIDEO_3DS_DISPLAY_MODE,
-                  video_3ds_display_mode,
+                  DEFAULT_VIDEO_3DS_DISPLAY_MODE,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -18201,7 +18832,7 @@ static bool setting_append_list(
                &settings->bools.new3ds_speedup_enable,
                MENU_ENUM_LABEL_NEW3DS_SPEEDUP_ENABLE,
                MENU_ENUM_LABEL_VALUE_NEW3DS_SPEEDUP_ENABLE,
-               new3ds_speedup_enable,
+               DEFAULT_NEW_3DS_SPEEDUP_ENABLE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18217,7 +18848,7 @@ static bool setting_append_list(
                &settings->bools.video_3ds_lcd_bottom,
                MENU_ENUM_LABEL_VIDEO_3DS_LCD_BOTTOM,
                MENU_ENUM_LABEL_VALUE_VIDEO_3DS_LCD_BOTTOM,
-               video_3ds_lcd_bottom,
+               DEFAULT_VIDEO_3DS_LCD_BOTTOM,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18340,7 +18971,7 @@ static bool setting_append_list(
                &settings->bools.menu_show_online_updater,
                MENU_ENUM_LABEL_MENU_SHOW_ONLINE_UPDATER,
                MENU_ENUM_LABEL_VALUE_MENU_SHOW_ONLINE_UPDATER,
-               menu_show_online_updater,
+               DEFAULT_MENU_SHOW_ONLINE_UPDATER,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18356,7 +18987,7 @@ static bool setting_append_list(
                &settings->bools.menu_show_core_updater,
                MENU_ENUM_LABEL_MENU_SHOW_CORE_UPDATER,
                MENU_ENUM_LABEL_VALUE_MENU_SHOW_CORE_UPDATER,
-               menu_show_online_updater,
+               DEFAULT_MENU_SHOW_ONLINE_UPDATER,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18371,7 +19002,7 @@ static bool setting_append_list(
                &settings->bools.menu_show_legacy_thumbnail_updater,
                MENU_ENUM_LABEL_MENU_SHOW_LEGACY_THUMBNAIL_UPDATER,
                MENU_ENUM_LABEL_VALUE_MENU_SHOW_LEGACY_THUMBNAIL_UPDATER,
-               menu_show_legacy_thumbnail_updater,
+               DEFAULT_MENU_SHOW_LEGACY_THUMBNAIL_UPDATER,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18388,7 +19019,7 @@ static bool setting_append_list(
                &settings->bools.menu_show_core_manager_steam,
                MENU_ENUM_LABEL_MENU_SHOW_CORE_MANAGER_STEAM,
                MENU_ENUM_LABEL_VALUE_MENU_SHOW_CORE_MANAGER_STEAM,
-               menu_show_core_manager_steam,
+               DEFAULT_MENU_SHOW_CORE_MANAGER_STEAM,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18811,7 +19442,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_add_to_favorites,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_ADD_TO_FAVORITES,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_ADD_TO_FAVORITES,
-               quick_menu_show_add_to_favorites,
+               DEFAULT_QUICK_MENU_SHOW_ADD_TO_FAVORITES,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18826,7 +19457,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_start_recording,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_START_RECORDING,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_START_RECORDING,
-               quick_menu_show_start_recording,
+               DEFAULT_QUICK_MENU_SHOW_START_RECORDING,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18841,7 +19472,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_start_streaming,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_START_STREAMING,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_START_STREAMING,
-               quick_menu_show_start_streaming,
+               DEFAULT_QUICK_MENU_SHOW_START_STREAMING,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18856,7 +19487,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_set_core_association,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_SET_CORE_ASSOCIATION,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_SET_CORE_ASSOCIATION,
-               quick_menu_show_set_core_association,
+               DEFAULT_QUICK_MENU_SHOW_SET_CORE_ASSOCIATION,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18871,7 +19502,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_reset_core_association,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_RESET_CORE_ASSOCIATION,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_RESET_CORE_ASSOCIATION,
-               quick_menu_show_reset_core_association,
+               DEFAULT_QUICK_MENU_SHOW_RESET_CORE_ASSOCIATION,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18880,38 +19511,6 @@ static bool setting_append_list(
                general_write_handler,
                general_read_handler,
                SD_FLAG_NONE);
-
-#if 0
-         CONFIG_BOOL(
-               list, list_info,
-               &settings->bools.quick_menu_show_recording,
-               MENU_ENUM_LABEL_QUICK_MENU_START_RECORDING,
-               MENU_ENUM_LABEL_VALUE_QUICK_MENU_START_RECORDING,
-               quick_menu_show_recording,
-               MENU_ENUM_LABEL_VALUE_OFF,
-               MENU_ENUM_LABEL_VALUE_ON,
-               &group_info,
-               &subgroup_info,
-               parent_group,
-               general_write_handler,
-               general_read_handler,
-               SD_FLAG_NONE);
-
-         CONFIG_BOOL(
-               list, list_info,
-               &settings->bools.quick_menu_show_streaming,
-               MENU_ENUM_LABEL_QUICK_MENU_START_STREAMING,
-               MENU_ENUM_LABEL_VALUE_QUICK_MENU_START_STREAMING,
-               quick_menu_show_streaming,
-               MENU_ENUM_LABEL_VALUE_OFF,
-               MENU_ENUM_LABEL_VALUE_ON,
-               &group_info,
-               &subgroup_info,
-               parent_group,
-               general_write_handler,
-               general_read_handler,
-               SD_FLAG_NONE);
-#endif
 
          CONFIG_BOOL(
                list, list_info,
@@ -18963,7 +19562,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_options,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_OPTIONS,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_OPTIONS,
-               quick_menu_show_options,
+               DEFAULT_QUICK_MENU_SHOW_CORE_OPTIONS,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -18993,7 +19592,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_controls,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_CONTROLS,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_CONTROLS,
-               quick_menu_show_controls,
+               DEFAULT_QUICK_MENU_SHOW_CONTROLS,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19008,7 +19607,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_cheats,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_CHEATS,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_CHEATS,
-               quick_menu_show_cheats,
+               DEFAULT_QUICK_MENU_SHOW_CHEATS,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19026,7 +19625,7 @@ static bool setting_append_list(
                   &settings->bools.quick_menu_show_shaders,
                   MENU_ENUM_LABEL_QUICK_MENU_SHOW_SHADERS,
                   MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_SHADERS,
-                  quick_menu_show_shaders,
+                  DEFAULT_QUICK_MENU_SHOW_SHADERS,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -19043,7 +19642,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_save_core_overrides,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_SAVE_CORE_OVERRIDES,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_SAVE_CORE_OVERRIDES,
-               quick_menu_show_save_core_overrides,
+               DEFAULT_QUICK_MENU_SHOW_SAVE_CORE_OVERRIDES,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19058,7 +19657,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_save_game_overrides,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_SAVE_GAME_OVERRIDES,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_SAVE_GAME_OVERRIDES,
-               quick_menu_show_save_game_overrides,
+               DEFAULT_QUICK_MENU_SHOW_SAVE_GAME_OVERRIDES,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19073,7 +19672,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_information,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_INFORMATION,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_INFORMATION,
-               quick_menu_show_information,
+               DEFAULT_QUICK_MENU_SHOW_INFORMATION,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19089,7 +19688,7 @@ static bool setting_append_list(
                &settings->bools.quick_menu_show_download_thumbnails,
                MENU_ENUM_LABEL_QUICK_MENU_SHOW_DOWNLOAD_THUMBNAILS,
                MENU_ENUM_LABEL_VALUE_QUICK_MENU_SHOW_DOWNLOAD_THUMBNAILS,
-               quick_menu_show_download_thumbnails,
+               DEFAULT_QUICK_MENU_SHOW_DOWNLOAD_THUMBNAILS,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19105,7 +19704,7 @@ static bool setting_append_list(
                &settings->bools.menu_scroll_fast,
                MENU_ENUM_LABEL_MENU_SCROLL_FAST,
                MENU_ENUM_LABEL_VALUE_MENU_SCROLL_FAST,
-               menu_scroll_fast,
+               DEFAULT_MENU_SCROLL_FAST,
                MENU_ENUM_LABEL_VALUE_SCROLL_NORMAL,
                MENU_ENUM_LABEL_VALUE_SCROLL_FAST,
                &group_info,
@@ -19136,7 +19735,7 @@ static bool setting_append_list(
                &settings->bools.ui_companion_enable,
                MENU_ENUM_LABEL_UI_COMPANION_ENABLE,
                MENU_ENUM_LABEL_VALUE_UI_COMPANION_ENABLE,
-               ui_companion_enable,
+               DEFAULT_UI_COMPANION_ENABLE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19151,7 +19750,7 @@ static bool setting_append_list(
                &settings->bools.ui_companion_start_on_boot,
                MENU_ENUM_LABEL_UI_COMPANION_START_ON_BOOT,
                MENU_ENUM_LABEL_VALUE_UI_COMPANION_START_ON_BOOT,
-               ui_companion_start_on_boot,
+               DEFAULT_UI_COMPANION_START_ON_BOOT,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19184,7 +19783,7 @@ static bool setting_append_list(
                &settings->bools.ui_companion_toggle,
                MENU_ENUM_LABEL_UI_COMPANION_TOGGLE,
                MENU_ENUM_LABEL_VALUE_UI_COMPANION_TOGGLE,
-               ui_companion_toggle,
+               DEFAULT_UI_COMPANION_TOGGLE,
                MENU_ENUM_LABEL_VALUE_OFF,
                MENU_ENUM_LABEL_VALUE_ON,
                &group_info,
@@ -19232,7 +19831,7 @@ static bool setting_append_list(
                &settings->uints.content_history_size,
                MENU_ENUM_LABEL_CONTENT_HISTORY_SIZE,
                MENU_ENUM_LABEL_VALUE_CONTENT_HISTORY_SIZE,
-               default_content_history_size,
+               DEFAULT_CONTENT_HISTORY_SIZE,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -19255,7 +19854,7 @@ static bool setting_append_list(
                &settings->ints.content_favorites_size,
                MENU_ENUM_LABEL_CONTENT_FAVORITES_SIZE,
                MENU_ENUM_LABEL_VALUE_CONTENT_FAVORITES_SIZE,
-               default_content_favorites_size,
+               DEFAULT_CONTENT_FAVORITES_SIZE,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -19483,8 +20082,9 @@ static bool setting_append_list(
                SD_FLAG_NONE
             );
 
-#ifdef HAVE_OZONE
-         if (string_is_equal(settings->arrays.menu_driver, "ozone"))
+#if defined(HAVE_OZONE) || defined(HAVE_XMB)
+         if (string_is_equal(settings->arrays.menu_driver, "ozone") ||
+             string_is_equal(settings->arrays.menu_driver, "xmb"))
          {
             CONFIG_BOOL(
                   list, list_info,
@@ -19500,6 +20100,9 @@ static bool setting_append_list(
                   general_write_handler,
                   general_read_handler,
                   SD_FLAG_NONE);
+            (*list)[list_info->index - 1].action_ok     = setting_bool_action_left_with_refresh;
+            (*list)[list_info->index - 1].action_left   = setting_bool_action_left_with_refresh;
+            (*list)[list_info->index - 1].action_right  = setting_bool_action_right_with_refresh;
 
             CONFIG_BOOL(
                   list, list_info,
@@ -19591,22 +20194,6 @@ static bool setting_append_list(
 
          CONFIG_BOOL(
                list, list_info,
-               &settings->bools.cheevos_challenge_indicators,
-               MENU_ENUM_LABEL_CHEEVOS_CHALLENGE_INDICATORS,
-               MENU_ENUM_LABEL_VALUE_CHEEVOS_CHALLENGE_INDICATORS,
-               true,
-               MENU_ENUM_LABEL_VALUE_OFF,
-               MENU_ENUM_LABEL_VALUE_ON,
-               &group_info,
-               &subgroup_info,
-               parent_group,
-               general_write_handler,
-               general_read_handler,
-               SD_FLAG_NONE
-               );
-
-         CONFIG_BOOL(
-               list, list_info,
                &settings->bools.cheevos_richpresence_enable,
                MENU_ENUM_LABEL_CHEEVOS_RICHPRESENCE_ENABLE,
                MENU_ENUM_LABEL_VALUE_CHEEVOS_RICHPRESENCE_ENABLE,
@@ -19660,22 +20247,6 @@ static bool setting_append_list(
 
          CONFIG_BOOL(
                list, list_info,
-               &settings->bools.cheevos_verbose_enable,
-               MENU_ENUM_LABEL_CHEEVOS_VERBOSE_ENABLE,
-               MENU_ENUM_LABEL_VALUE_CHEEVOS_VERBOSE_ENABLE,
-               true,
-               MENU_ENUM_LABEL_VALUE_OFF,
-               MENU_ENUM_LABEL_VALUE_ON,
-               &group_info,
-               &subgroup_info,
-               parent_group,
-               general_write_handler,
-               general_read_handler,
-               SD_FLAG_ADVANCED
-               );
-
-         CONFIG_BOOL(
-               list, list_info,
                &settings->bools.cheevos_auto_screenshot,
                MENU_ENUM_LABEL_CHEEVOS_AUTO_SCREENSHOT,
                MENU_ENUM_LABEL_VALUE_CHEEVOS_AUTO_SCREENSHOT,
@@ -19722,6 +20293,200 @@ static bool setting_append_list(
                SD_FLAG_NONE
                );
          MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_CHEEVOS_HARDCORE_MODE_TOGGLE);
+
+         END_SUB_GROUP(list, list_info, parent_group);
+         END_GROUP(list, list_info, parent_group);
+#endif
+         break;
+      case SETTINGS_LIST_CHEEVOS_APPEARANCE:
+#ifdef HAVE_CHEEVOS
+         START_GROUP(list, list_info, &group_info,
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_SETTINGS),
+            parent_group);
+         parent_group = msg_hash_to_str(MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_SETTINGS);
+         START_SUB_GROUP(list, list_info, "State", &group_info, &subgroup_info, parent_group);
+
+#ifdef HAVE_GFX_WIDGETS
+         CONFIG_UINT(
+            list, list_info,
+            &settings->uints.cheevos_appearance_anchor,
+            MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_ANCHOR,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_ANCHOR,
+            DEFAULT_CHEEVOS_APPEARANCE_ANCHOR,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            cheevos_appearance_write_handler,
+            general_read_handler);
+         (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+         (*list)[list_info->index - 1].action_left = &setting_uint_action_left_with_refresh;
+         (*list)[list_info->index - 1].action_right = &setting_uint_action_right_with_refresh;
+         (*list)[list_info->index - 1].get_string_representation =
+            &setting_get_string_representation_uint_cheevos_appearance_anchor;
+         menu_settings_list_current_add_range(list, list_info, 0, CHEEVOS_APPEARANCE_ANCHOR_LAST - 1, 1, true, true);
+         (*list)[list_info->index - 1].ui_type = ST_UI_TYPE_UINT_COMBOBOX;
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_appearance_padding_auto,
+            MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_PADDING_AUTO,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_PADDING_AUTO,
+            true,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            cheevos_appearance_write_handler,
+            general_read_handler,
+            SD_FLAG_NONE
+         );
+         (*list)[list_info->index - 1].action_ok = setting_bool_action_left_with_refresh;
+         (*list)[list_info->index - 1].action_left = setting_bool_action_left_with_refresh;
+         (*list)[list_info->index - 1].action_right = setting_bool_action_right_with_refresh;
+
+         CONFIG_FLOAT(
+            list, list_info,
+            &settings->floats.cheevos_appearance_padding_h,
+            MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_PADDING_H,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_PADDING_H,
+            DEFAULT_CHEEVOS_APPEARANCE_PADDING_H,
+            "%.2f",
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            cheevos_appearance_write_handler,
+            general_read_handler
+         );
+         menu_settings_list_current_add_range(list, list_info, 0.0, 0.5, 0.01, true, true);
+
+         CONFIG_FLOAT(
+            list, list_info,
+            &settings->floats.cheevos_appearance_padding_v,
+            MENU_ENUM_LABEL_CHEEVOS_APPEARANCE_PADDING_V,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_APPEARANCE_PADDING_V,
+            DEFAULT_CHEEVOS_APPEARANCE_PADDING_V,
+            "%.2f",
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            cheevos_appearance_write_handler,
+            general_read_handler
+         );
+         menu_settings_list_current_add_range(list, list_info, 0.0, 0.5, 0.01, true, true);
+#endif
+
+         END_SUB_GROUP(list, list_info, parent_group);
+         END_GROUP(list, list_info, parent_group);
+#endif
+         break;
+      case SETTINGS_LIST_CHEEVOS_VISIBILITY:
+#ifdef HAVE_CHEEVOS
+         START_GROUP(list, list_info, &group_info,
+            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_SETTINGS),
+            parent_group);
+         parent_group = msg_hash_to_str(MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_SETTINGS);
+         START_SUB_GROUP(list, list_info, "State", &group_info, &subgroup_info, parent_group);
+
+         CONFIG_UINT(
+            list, list_info,
+            &settings->uints.cheevos_visibility_summary,
+            MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_SUMMARY,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_SUMMARY,
+            DEFAULT_CHEEVOS_VISIBILITY_SUMMARY,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler);
+         (*list)[list_info->index - 1].action_ok = &setting_action_ok_uint;
+         (*list)[list_info->index - 1].action_left = &setting_uint_action_left_with_refresh;
+         (*list)[list_info->index - 1].action_right = &setting_uint_action_right_with_refresh;
+         (*list)[list_info->index - 1].get_string_representation =
+            &setting_get_string_representation_uint_cheevos_visibility_summary;
+         menu_settings_list_current_add_range(list, list_info, 0, RCHEEVOS_SUMMARY_LAST - 1, 1, true, true);
+         (*list)[list_info->index - 1].ui_type = ST_UI_TYPE_UINT_COMBOBOX;
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_visibility_unlock,
+            MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_UNLOCK,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_UNLOCK,
+            DEFAULT_CHEEVOS_VISIBILITY_UNLOCK,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler,
+            SD_FLAG_NONE
+         );
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_visibility_mastery,
+            MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_MASTERY,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_MASTERY,
+            DEFAULT_CHEEVOS_VISIBILITY_MASTERY,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler,
+            SD_FLAG_NONE
+         );
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_challenge_indicators,
+            MENU_ENUM_LABEL_CHEEVOS_CHALLENGE_INDICATORS,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_CHALLENGE_INDICATORS,
+            true,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler,
+            SD_FLAG_NONE
+         );
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_verbose_enable,
+            MENU_ENUM_LABEL_CHEEVOS_VERBOSE_ENABLE,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VERBOSE_ENABLE,
+            true,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler,
+            SD_FLAG_ADVANCED
+         );
+
+         CONFIG_BOOL(
+            list, list_info,
+            &settings->bools.cheevos_visibility_account,
+            MENU_ENUM_LABEL_CHEEVOS_VISIBILITY_ACCOUNT,
+            MENU_ENUM_LABEL_VALUE_CHEEVOS_VISIBILITY_ACCOUNT,
+            DEFAULT_CHEEVOS_VISIBILITY_ACCOUNT,
+            MENU_ENUM_LABEL_VALUE_OFF,
+            MENU_ENUM_LABEL_VALUE_ON,
+            &group_info,
+            &subgroup_info,
+            parent_group,
+            general_write_handler,
+            general_read_handler,
+            SD_FLAG_ADVANCED
+         );
+
 
          END_SUB_GROUP(list, list_info, parent_group);
          END_GROUP(list, list_info, parent_group);
@@ -19915,7 +20680,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_public_announce,
                   MENU_ENUM_LABEL_NETPLAY_PUBLIC_ANNOUNCE,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_PUBLIC_ANNOUNCE,
-                  true,
+                  DEFAULT_NETPLAY_PUBLIC_ANNOUNCE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -19930,7 +20695,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_use_mitm_server,
                   MENU_ENUM_LABEL_NETPLAY_USE_MITM_SERVER,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_USE_MITM_SERVER,
-                  netplay_use_mitm_server,
+                  DEFAULT_NETPLAY_USE_MITM_SERVER,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20016,7 +20781,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_max_connections,
                   MENU_ENUM_LABEL_NETPLAY_MAX_CONNECTIONS,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_MAX_CONNECTIONS,
-                  netplay_max_connections,
+                  DEFAULT_NETPLAY_MAX_CONNECTIONS,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20032,7 +20797,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_max_ping,
                   MENU_ENUM_LABEL_NETPLAY_MAX_PING,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_MAX_PING,
-                  netplay_max_ping,
+                  DEFAULT_NETPLAY_MAX_PING,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20078,7 +20843,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_start_as_spectator,
                   MENU_ENUM_LABEL_NETPLAY_START_AS_SPECTATOR,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_START_AS_SPECTATOR,
-                  false,
+                  DEFAULT_NETPLAY_START_AS_SPECTATOR,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20093,7 +20858,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_fade_chat,
                   MENU_ENUM_LABEL_NETPLAY_FADE_CHAT,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_FADE_CHAT,
-                  netplay_fade_chat,
+                  DEFAULT_NETPLAY_FADE_CHAT,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20108,7 +20873,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_chat_color_name,
                   MENU_ENUM_LABEL_NETPLAY_CHAT_COLOR_NAME,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_CHAT_COLOR_NAME,
-                  netplay_chat_color_name,
+                  DEFAULT_NETPLAY_CHAT_COLOR_NAME,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20126,7 +20891,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_chat_color_msg,
                   MENU_ENUM_LABEL_NETPLAY_CHAT_COLOR_MSG,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_CHAT_COLOR_MSG,
-                  netplay_chat_color_msg,
+                  DEFAULT_NETPLAY_CHAT_COLOR_MSG,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20144,7 +20909,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_allow_pausing,
                   MENU_ENUM_LABEL_NETPLAY_ALLOW_PAUSING,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_ALLOW_PAUSING,
-                  netplay_allow_pausing,
+                  DEFAULT_NETPLAY_ALLOW_PAUSING,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20159,7 +20924,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_allow_slaves,
                   MENU_ENUM_LABEL_NETPLAY_ALLOW_SLAVES,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_ALLOW_SLAVES,
-                  true,
+                  DEFAULT_NETPLAY_ALLOW_SLAVES,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20178,7 +20943,7 @@ static bool setting_append_list(
                   &settings->bools.netplay_require_slaves,
                   MENU_ENUM_LABEL_NETPLAY_REQUIRE_SLAVES,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_REQUIRE_SLAVES,
-                  false,
+                  DEFAULT_NETPLAY_REQUIRE_SLAVES,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20194,7 +20959,7 @@ static bool setting_append_list(
                   &settings->ints.netplay_check_frames,
                   MENU_ENUM_LABEL_NETPLAY_CHECK_FRAMES,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_CHECK_FRAMES,
-                  netplay_check_frames,
+                  DEFAULT_NETPLAY_CHECK_FRAMES,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20255,7 +21020,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_share_digital,
                   MENU_ENUM_LABEL_NETPLAY_SHARE_DIGITAL,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_SHARE_DIGITAL,
-                  netplay_share_digital,
+                  DEFAULT_NETPLAY_SHARE_DIGITAL,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20272,7 +21037,7 @@ static bool setting_append_list(
                   &settings->uints.netplay_share_analog,
                   MENU_ENUM_LABEL_NETPLAY_SHARE_ANALOG,
                   MENU_ENUM_LABEL_VALUE_NETPLAY_SHARE_ANALOG,
-                  netplay_share_analog,
+                  DEFAULT_NETPLAY_SHARE_ANALOG,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20324,7 +21089,7 @@ static bool setting_append_list(
                   &settings->bools.network_cmd_enable,
                   MENU_ENUM_LABEL_NETWORK_CMD_ENABLE,
                   MENU_ENUM_LABEL_VALUE_NETWORK_CMD_ENABLE,
-                  network_cmd_enable,
+                  DEFAULT_NETWORK_CMD_ENABLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20342,7 +21107,7 @@ static bool setting_append_list(
                   &settings->uints.network_cmd_port,
                   MENU_ENUM_LABEL_NETWORK_CMD_PORT,
                   MENU_ENUM_LABEL_VALUE_NETWORK_CMD_PORT,
-                  network_cmd_port,
+                  DEFAULT_NETWORK_CMD_PORT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20376,7 +21141,7 @@ static bool setting_append_list(
                   &settings->uints.network_remote_base_port,
                   MENU_ENUM_LABEL_NETWORK_REMOTE_PORT,
                   MENU_ENUM_LABEL_VALUE_NETWORK_REMOTE_PORT,
-                  network_remote_base_port,
+                  DEFAULT_NETWORK_REMOTE_BASE_PORT,
                   &group_info,
                   &subgroup_info,
                   parent_group,
@@ -20427,7 +21192,7 @@ static bool setting_append_list(
                   &settings->bools.stdin_cmd_enable,
                   MENU_ENUM_LABEL_STDIN_CMD_ENABLE,
                   MENU_ENUM_LABEL_VALUE_STDIN_CMD_ENABLE,
-                  stdin_cmd_enable,
+                  DEFAULT_STDIN_CMD_ENABLE,
                   MENU_ENUM_LABEL_VALUE_OFF,
                   MENU_ENUM_LABEL_VALUE_ON,
                   &group_info,
@@ -20979,21 +21744,6 @@ static bool setting_append_list(
                general_write_handler,
                general_read_handler);
          (*list)[list_info->index - 1].action_start = directory_action_start_generic;
-
-         CONFIG_DIR(
-               list, list_info,
-               settings->paths.directory_cursor,
-               sizeof(settings->paths.directory_cursor),
-               MENU_ENUM_LABEL_CURSOR_DIRECTORY,
-               MENU_ENUM_LABEL_VALUE_CURSOR_DIRECTORY,
-               g_defaults.dirs[DEFAULT_DIR_CURSOR],
-               MENU_ENUM_LABEL_VALUE_DIRECTORY_NONE,
-               &group_info,
-               &subgroup_info,
-               parent_group,
-               general_write_handler,
-               general_read_handler);
-         (*list)[list_info->index - 1].action_start = directory_action_start_generic;
 #endif
 
          CONFIG_DIR(
@@ -21450,7 +22200,7 @@ static bool setting_append_list(
                &settings->uints.midi_volume,
                MENU_ENUM_LABEL_MIDI_VOLUME,
                MENU_ENUM_LABEL_VALUE_MIDI_VOLUME,
-               midi_volume,
+               DEFAULT_MIDI_VOLUME,
                &group_info,
                &subgroup_info,
                parent_group,
@@ -21667,7 +22417,7 @@ void menu_setting_free(rarch_setting_t *setting)
 
    /* Free data which was previously tagged */
    for (; setting->type != ST_NONE; (*list = *list + 1))
-      for (values = (unsigned)setting->free_flags, n = 0; values != 0; values >>= 1, n++)
+      for (values = setting->free_flags, n = 0; values != 0; values >>= 1, n++)
          if (values & 1)
             switch (1 << n)
             {
@@ -21699,9 +22449,6 @@ void menu_setting_free(rarch_setting_t *setting)
    (*&list)[pos].enum_idx                         = MSG_UNKNOWN; \
    (*&list)[pos].enum_value_idx                   = MSG_UNKNOWN; \
    (*&list)[pos].type                             = ST_NONE; \
-   (*&list)[pos].dont_use_enum_idx_representation = false; \
-   (*&list)[pos].enforce_minrange                 = false; \
-   (*&list)[pos].enforce_maxrange                 = false; \
    (*&list)[pos].index                            = 0; \
    (*&list)[pos].index_offset                     = 0; \
    (*&list)[pos].offset_by                        = 0; \
@@ -21735,7 +22482,6 @@ void menu_setting_free(rarch_setting_t *setting)
    (*&list)[pos].original_value.fraction          = 0.0f; \
    (*&list)[pos].dir.empty_path                   = NULL; \
    (*&list)[pos].cmd_trigger_idx                  = CMD_EVENT_NONE; \
-   (*&list)[pos].cmd_trigger_event_triggered      = false; \
    (*&list)[pos].boolean.off_label                = NULL; \
    (*&list)[pos].boolean.on_label                 = NULL; \
 }
@@ -21783,6 +22529,8 @@ static rarch_setting_t *menu_setting_new_internal(rarch_setting_info_t *list_inf
       SETTINGS_LIST_MENU_SOUNDS,
       SETTINGS_LIST_PLAYLIST,
       SETTINGS_LIST_CHEEVOS,
+      SETTINGS_LIST_CHEEVOS_APPEARANCE,
+      SETTINGS_LIST_CHEEVOS_VISIBILITY,
       SETTINGS_LIST_CORE_UPDATER,
       SETTINGS_LIST_NETPLAY,
       SETTINGS_LIST_LAKKA_SERVICES,

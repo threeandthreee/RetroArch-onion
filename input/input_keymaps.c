@@ -20,7 +20,6 @@
 #include <ctype.h>
 
 #include <compat/strl.h>
-#include <retro_assert.h>
 #include <retro_miscellaneous.h>
 
 #ifdef HAVE_CONFIG_H
@@ -1459,7 +1458,7 @@ const struct rarch_key_map rarch_key_map_qnx[] = {
    { KEYCODE_RIGHT_CTRL, RETROK_RCTRL },
    { KEYCODE_LEFT_ALT, RETROK_LALT },
    { KEYCODE_RIGHT_ALT, RETROK_RALT },
-   // TODO/FIXME: Code for 'sym' key on BB keyboards. Figure out which sys/keycodes.h define this maps to.
+   /* TODO/FIXME: Code for 'sym' key on BB keyboards. Figure out which sys/keycodes.h define this maps to. */
    { 61651, RETROK_RSUPER },
    { KEYCODE_DOLLAR, RETROK_DOLLAR },
    { KEYCODE_MENU, RETROK_MENU },
@@ -1595,7 +1594,7 @@ const struct rarch_key_map rarch_key_map_apple_hid[] = {
    { KEY_RightAlt, RETROK_RALT },
    { KEY_LeftAlt, RETROK_LALT },
    { KEY_RightGUI, RETROK_RMETA },
-   { KEY_LeftGUI, RETROK_RMETA },
+   { KEY_LeftGUI, RETROK_LMETA },
    /* { ?, RETROK_LSUPER }, */
    /* { ?, RETROK_RSUPER }, */
    /* { ?, RETROK_MODE }, */
@@ -2039,7 +2038,6 @@ void input_keymaps_translate_rk_to_str(enum retro_key key, char *buf, size_t siz
 {
    unsigned i;
 
-   retro_assert(size >= 2);
    *buf = '\0';
 
    if (key >= RETROK_a && key <= RETROK_z)

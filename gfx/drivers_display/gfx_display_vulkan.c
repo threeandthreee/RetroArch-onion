@@ -22,25 +22,24 @@
 
 #include "../gfx_display.h"
 
-#include "../../retroarch.h"
 #include "../common/vulkan_common.h"
 
 /* Will do Y-flip later, but try to make it similar to GL. */
-static const float vk_vertexes[] = {
+static const float vk_vertexes[8] = {
    0, 0,
    1, 0,
    0, 1,
    1, 1
 };
 
-static const float vk_tex_coords[] = {
+static const float vk_tex_coords[8] = {
    0, 1,
    1, 1,
    0, 0,
    1, 0
 };
 
-static const float vk_colors[] = {
+static const float vk_colors[16] = {
    1.0f, 1.0f, 1.0f, 1.0f,
    1.0f, 1.0f, 1.0f, 1.0f,
    1.0f, 1.0f, 1.0f, 1.0f,
@@ -249,14 +248,14 @@ static void gfx_display_vk_draw(gfx_display_ctx_draw_t *draw,
          {
             struct vk_draw_triangles call;
             unsigned 
-               disp_pipeline  = ((draw->prim_type == 
-                        GFX_DISPLAY_PRIM_TRIANGLESTRIP) << 1) | 
-               (vk->display.blend << 0);
+               disp_pipeline  = 
+                 ((draw->prim_type == GFX_DISPLAY_PRIM_TRIANGLESTRIP) << 1)
+               | (((vk->flags & VK_FLAG_DISPLAY_BLEND) > 0) << 0);
             call.pipeline     = vk->display.pipelines[disp_pipeline];
             call.texture      = texture;
-            call.sampler      = texture->mipmap ?
+            call.sampler      = (texture->flags & VK_TEX_FLAG_MIPMAP) ?
                vk->samplers.mipmap_linear :
-               (texture->default_smooth ? vk->samplers.linear
+               ((texture->flags & VK_TEX_FLAG_DEFAULT_SMOOTH) ? vk->samplers.linear
                 : vk->samplers.nearest);
             call.uniform      = draw->matrix_data
                ? draw->matrix_data : &vk->mvp_no_rot;
@@ -275,7 +274,7 @@ static void gfx_display_vk_blend_begin(void *data)
    vk_t *vk = (vk_t*)data;
 
    if (vk)
-      vk->display.blend = true;
+      vk->flags |=  VK_FLAG_DISPLAY_BLEND;
 }
 
 static void gfx_display_vk_blend_end(void *data)
@@ -283,7 +282,7 @@ static void gfx_display_vk_blend_end(void *data)
    vk_t *vk = (vk_t*)data;
 
    if (vk)
-      vk->display.blend = false;
+      vk->flags &= ~VK_FLAG_DISPLAY_BLEND;
 }
 
 static void gfx_display_vk_scissor_begin(
@@ -294,11 +293,11 @@ static void gfx_display_vk_scissor_begin(
 {
    vk_t *vk                          = (vk_t*)data;
 
-   vk->tracker.use_scissor           = true;
    vk->tracker.scissor.offset.x      = x;
    vk->tracker.scissor.offset.y      = y;
    vk->tracker.scissor.extent.width  = width;
    vk->tracker.scissor.extent.height = height;
+   vk->flags                        |= VK_FLAG_TRACKER_USE_SCISSOR;
    vk->tracker.dirty                |= VULKAN_DIRTY_DYNAMIC_BIT;
 }
 
@@ -308,8 +307,8 @@ static void gfx_display_vk_scissor_end(void *data,
 {
    vk_t *vk                 = (vk_t*)data;
 
-   vk->tracker.use_scissor  = false;
-   vk->tracker.dirty       |= VULKAN_DIRTY_DYNAMIC_BIT;
+   vk->flags               &= ~VK_FLAG_TRACKER_USE_SCISSOR;
+   vk->tracker.dirty       |=  VULKAN_DIRTY_DYNAMIC_BIT;
 }
 
 gfx_display_ctx_driver_t gfx_display_ctx_vulkan = {

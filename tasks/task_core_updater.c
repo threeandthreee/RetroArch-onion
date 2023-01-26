@@ -3,7 +3,6 @@
  *  Copyright (C) 2014-2017 - Jean-André Santoni
  *  Copyright (C) 2016-2019 - Brad Parker
  *  Copyright (C)      2019 - James Leaver
- *  Copyright (C)      2022 - Roberto V. Rampim
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -17,9 +16,9 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <ctype.h>
 #include <boolean.h>
 
@@ -78,6 +77,7 @@ enum core_updater_download_status
    CORE_UPDATER_DOWNLOAD_START_TRANSFER,
    CORE_UPDATER_DOWNLOAD_WAIT_TRANSFER,
    CORE_UPDATER_DOWNLOAD_WAIT_DECOMPRESS,
+   CORE_UPDATER_DOWNLOAD_ERROR,
    CORE_UPDATER_DOWNLOAD_END
 };
 
@@ -634,9 +634,11 @@ void cb_http_task_core_updater_download(
 finish:
    /* Log any error messages */
    if (!string_is_empty(err))
+   {
       RARCH_ERR("[core updater] Download of '%s' failed: %s\n",
             (transf ? transf->path: "unknown"), err);
-
+      download_handle->status = CORE_UPDATER_DOWNLOAD_ERROR;
+   }
    if (transf)
       free(transf);
 
@@ -922,6 +924,21 @@ static void task_core_updater_download_handler(retro_task_t *task)
              * callback to trigger */
             if (download_handle->decompress_task_complete)
                download_handle->status = CORE_UPDATER_DOWNLOAD_END;
+         }
+         break;
+      case CORE_UPDATER_DOWNLOAD_ERROR:
+         {
+            char task_title[PATH_MAX_LENGTH];
+
+            /* Set final task title */
+            task_free_title(task);
+
+            strlcpy(task_title, msg_hash_to_str(MSG_CORE_INSTALL_FAILED), sizeof(task_title));
+            strlcat(task_title, download_handle->display_name, sizeof(task_title));
+
+            task_set_title(task, strdup(task_title));
+            task_set_progress(task, 100);
+            goto task_finished;
          }
          break;
       case CORE_UPDATER_DOWNLOAD_END:

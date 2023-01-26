@@ -101,13 +101,6 @@ char *manual_content_scan_get_content_dir_ptr(void)
    return scan_settings.content_dir;
 }
 
-/* Returns size of the internal
- * 'content_dir' string */
-size_t manual_content_scan_get_content_dir_size(void)
-{
-   return sizeof(scan_settings.content_dir);
-}
-
 /* Returns a pointer to the internal
  * 'system_name_custom' string */
 char *manual_content_scan_get_system_name_custom_ptr(void)
@@ -1394,12 +1387,12 @@ void manual_content_scan_add_content_to_playlist(
        * > The push function reads our entry as const,
        *   so these casts are safe */
       entry.path       = (char*)playlist_content_path;
-      entry.entry_slot = 0;
       entry.label      = label;
       entry.core_path  = (char*)FILE_PATH_DETECT;
       entry.core_name  = (char*)FILE_PATH_DETECT;
       entry.crc32      = (char*)"00000000|crc";
       entry.db_name    = task_config->database_name;
+      entry.entry_slot = 0;
 
       /* Add entry to playlist */
       playlist_push(playlist, &entry);

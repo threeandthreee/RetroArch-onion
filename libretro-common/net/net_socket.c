@@ -469,6 +469,33 @@ done:
    sceNetEpollDestroy(epoll_fd);
 
    return ret;
+#elif defined(_3DS)
+   int i;
+   int timeout_quotient;
+   int timeout_remainder;
+   int ret = -1;
+
+#define TIMEOUT_DIVISOR 100
+   if (timeout <= TIMEOUT_DIVISOR)
+      return poll(fds, nfds, timeout);
+
+   timeout_quotient = timeout / TIMEOUT_DIVISOR;
+   for (i = 0; i < timeout_quotient; i++)
+   {
+      ret = poll(fds, nfds, TIMEOUT_DIVISOR);
+
+      /* Success or error. */
+      if (ret)
+         return ret;
+   }
+
+   timeout_remainder = timeout % TIMEOUT_DIVISOR;
+   if (timeout_remainder)
+      ret = poll(fds, nfds, timeout_remainder);
+
+   return ret;
+#undef TIMEOUT_DIVISOR
+
 #elif defined(GEKKO)
    return net_poll(fds, nfds, timeout);
 #else
@@ -728,7 +755,22 @@ bool socket_connect_with_timeout(int fd, void *data, int timeout)
          return false;
    }
 
-#if !defined(GEKKO) && defined(SO_ERROR)
+#if defined(GEKKO)
+   /* libogc does not have getsockopt implemented */
+   res = connect(fd, addr->ai_addr, addr->ai_addrlen);
+   if (res < 0 && -res != EISCONN)
+      return false;
+#elif defined(_3DS)
+   /* libctru getsockopt does not return expected value */
+   if ((connect(fd, addr->ai_addr, addr->ai_addrlen) < 0) && errno != EISCONN)
+      return false;
+#elif defined(WIIU)
+   /* On WiiU, getsockopt() returns -1 and sets lastsocketerr() (Wii's
+    * equivalent to errno) to 16. */
+   if ((connect(fd, addr->ai_addr, addr->ai_addrlen) == -1)
+         && socketlasterr() != SO_EISCONN)
+      return false;
+#else
    {
       int       error = -1;
       socklen_t errsz = sizeof(error);

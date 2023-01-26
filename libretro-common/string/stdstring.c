@@ -233,7 +233,7 @@ void word_wrap(
 
    /* Early return if src string length is less
     * than line width */
-   if (src_len < line_width)
+   if (src_len < (size_t)line_width)
    {
       strlcpy(dst, src, dst_size);
       return;
@@ -692,8 +692,9 @@ void string_remove_all_whitespace(char *str_trimmed, const char *str)
 int string_index_last_occurance(const char *str, char c)
 {
    const char *pos = strrchr(str, c);
-
-   return pos ? (pos - str) : -1;
+   if (pos)
+      return (int)(pos - str);
+   return -1;
 }
 
 /**
@@ -707,7 +708,7 @@ int string_find_index_substring_string(const char *str, const char *substr)
 {
    const char *pos = strstr(str, substr);
    if (pos)
-      return pos - str;
+      return (int)(pos - str);
    return -1;
 }
 

@@ -39,19 +39,15 @@
 #include <wiiu/procui.h>
 #include <wiiu/sysapp.h>
 
-#include "file_path_special.h"
 
 #include "../frontend.h"
 #include "../frontend_driver.h"
+#include "../../file_path_special.h"
 #include "../../defaults.h"
 #include "../../paths.h"
 #include "../../retroarch.h"
 #include "../../verbosity.h"
-
-#include "hbl.h"
-#include "wiiu_dbg.h"
-#include "system/exception_handler.h"
-#include "tasks/tasks_internal.h"
+#include "../../tasks/tasks_internal.h"
 
 #ifndef IS_SALAMANDER
 #ifdef HAVE_MENU
@@ -62,6 +58,10 @@
 #include "../../network/netplay/netplay.h"
 #endif
 #endif
+
+#include "hbl.h"
+#include "wiiu_dbg.h"
+#include "system/exception_handler.h"
 
 #define WIIU_SD_PATH "sd:/"
 #define WIIU_USB_PATH "usb:/"
@@ -130,10 +130,16 @@ static void frontend_wiiu_get_env_settings(int *argc, char *argv[],
          "filters", sizeof(g_defaults.dirs[DEFAULT_DIR_VIDEO_FILTER]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], g_defaults.dirs[DEFAULT_DIR_PORT],
          "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], g_defaults.dirs[DEFAULT_DIR_PORT],
-         "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_LOGS], g_defaults.dirs[DEFAULT_DIR_CORE],
          "logs", sizeof(g_defaults.dirs[DEFAULT_DIR_LOGS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_THUMBNAILS], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "thumbnails", sizeof(g_defaults.dirs[DEFAULT_DIR_THUMBNAILS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_OVERLAY], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "overlays", sizeof(g_defaults.dirs[DEFAULT_DIR_OVERLAY]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SCREENSHOT], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "screenshots", sizeof(g_defaults.dirs[DEFAULT_DIR_SCREENSHOT]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "autoconfig", sizeof(g_defaults.dirs[DEFAULT_DIR_AUTOCONFIG]));
    fill_pathname_join(g_defaults.path_config, g_defaults.dirs[DEFAULT_DIR_PORT],
          FILE_PATH_MAIN_CONFIG, sizeof(g_defaults.path_config));
 
