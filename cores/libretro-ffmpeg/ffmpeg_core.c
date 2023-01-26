@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <assert.h>
 #include <stdarg.h>
 
 #ifdef RARCH_INTERNAL
@@ -856,7 +855,7 @@ void CORE_PREFIX(retro_run)(void)
                glBindTexture(GL_TEXTURE_2D, frames[1].tex);
 #if defined(HAVE_OPENGLES)
                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                     media.width, media.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                     media.width, media.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, video_frame_temp_buffer);
 #else
                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
                      media.width, media.height, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);

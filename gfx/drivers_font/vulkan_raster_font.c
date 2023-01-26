@@ -1,4 +1,4 @@
-﻿/*  RetroArch - A frontend for libretro.
+/*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2016-2017 - Hans-Kristian Arntzen
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -85,7 +85,6 @@ static void *vulkan_font_init(void *data,
             &font->font_driver,
             &font->font_data, font_path, font_size))
    {
-      RARCH_WARN("Couldn't initialize font renderer.\n");
       free(font);
       return NULL;
    }
@@ -358,7 +357,7 @@ static void vulkan_font_render_msg(
    float color[4];
    int drop_x, drop_y;
    bool full_screen;
-   unsigned max_glyphs;
+   size_t max_glyphs;
    unsigned width, height;
    enum text_alignment text_align;
    float x, y, scale, drop_mod, drop_alpha;

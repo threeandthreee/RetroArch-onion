@@ -1042,8 +1042,8 @@ void CoreOptionsDialog::onCoreOptionComboBoxCurrentIndexChanged(int index)
 {
    unsigned i, k;
    QString key, val;
-   size_t          opts = 0;
-   QComboBox *combo_box = qobject_cast<QComboBox*>(sender());
+   runloop_state_t *runloop_st  = runloop_state_get_ptr();
+   QComboBox *combo_box         = qobject_cast<QComboBox*>(sender());
 
    if (!combo_box)
       return;
@@ -1051,37 +1051,34 @@ void CoreOptionsDialog::onCoreOptionComboBoxCurrentIndexChanged(int index)
    key = combo_box->itemData(index, Qt::UserRole).toString();
    val = combo_box->itemText(index);
 
-   if (retroarch_ctl(RARCH_CTL_HAS_CORE_OPTIONS, NULL))
+   if (runloop_st->core_options)
    {
-      retroarch_ctl(RARCH_CTL_GET_CORE_OPTION_SIZE, &opts);
+      core_option_manager_t *coreopts = NULL;
 
-      if (opts)
+      retroarch_ctl(RARCH_CTL_CORE_OPTIONS_LIST_GET, &coreopts);
+
+      if (coreopts)
       {
-         core_option_manager_t *coreopts = NULL;
+         size_t opts = runloop_st->core_options->size;
 
-         retroarch_ctl(RARCH_CTL_CORE_OPTIONS_LIST_GET, &coreopts);
-
-         if (coreopts)
+         for (i = 0; i < opts; i++)
          {
-            for (i = 0; i < opts; i++)
+            QString optKey;
+            struct core_option *option = static_cast<struct core_option*>(&coreopts->opts[i]);
+
+            if (!option)
+               continue;
+
+            optKey = option->key;
+
+            if (key == optKey)
             {
-               QString optKey;
-               struct core_option *option = static_cast<struct core_option*>(&coreopts->opts[i]);
-
-               if (!option)
-                  continue;
-
-               optKey = option->key;
-
-               if (key == optKey)
+               for (k = 0; k < option->vals->size; k++)
                {
-                  for (k = 0; k < option->vals->size; k++)
-                  {
-                     QString str = option->vals->elems[k].data;
+                  QString str = option->vals->elems[k].data;
 
-                     if (!str.isEmpty() && str == val)
-                        core_option_manager_set_val(coreopts, i, k, true);
-                  }
+                  if (!str.isEmpty() && str == val)
+                     core_option_manager_set_val(coreopts, i, k, true);
                }
             }
          }
@@ -1092,137 +1089,134 @@ void CoreOptionsDialog::onCoreOptionComboBoxCurrentIndexChanged(int index)
 void CoreOptionsDialog::buildLayout()
 {
    unsigned j, k;
-   size_t opts = 0;
-   QFormLayout    *form  = NULL;
-   settings_t *settings  = config_get_ptr();
-   bool has_core_options = retroarch_ctl(RARCH_CTL_HAS_CORE_OPTIONS, NULL);
+   QFormLayout *form            = NULL;
+   settings_t *settings         = config_get_ptr();
+   runloop_state_t *runloop_st  = runloop_state_get_ptr();
+   bool has_core_options        = (runloop_st->core_options != NULL);
+   size_t opts                  = (runloop_st->core_options) ? runloop_st->core_options->size : 0;
 
    clearLayout();
 
    if (has_core_options)
    {
-      retroarch_ctl(RARCH_CTL_GET_CORE_OPTION_SIZE, &opts);
+      core_option_manager_t *coreopts = NULL;
 
-      if (opts)
+      form = new QFormLayout();
+
+      if (settings->bools.game_specific_options)
       {
-         core_option_manager_t *coreopts = NULL;
+         QString contentLabel;
+         QString label;
+         rarch_system_info_t *system = &runloop_st->system;
 
-         form = new QFormLayout();
+         /* TODO/FIXME - why have this check here? system is not used */
+         if (system)
+            contentLabel = QFileInfo(path_get(RARCH_PATH_BASENAME)).completeBaseName();
 
-         if (settings->bools.game_specific_options)
+         if (!contentLabel.isEmpty())
          {
-            QString contentLabel;
-            QString label;
-            rarch_system_info_t *system = &runloop_state_get_ptr()->system;
+            uint32_t flags = runloop_st->flags;
+            if (flags & RUNLOOP_FLAG_GAME_OPTIONS_ACTIVE)
+               label = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_GAME_SPECIFIC_OPTIONS_IN_USE);
+            else
+               label = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_GAME_SPECIFIC_OPTIONS_CREATE);
 
-            /* TODO/FIXME - why have this check here? system is not used */
-            if (system)
-               contentLabel = QFileInfo(path_get(RARCH_PATH_BASENAME)).completeBaseName();
-
-            if (!contentLabel.isEmpty())
+            if (!label.isEmpty())
             {
-               if (!retroarch_ctl(RARCH_CTL_IS_GAME_OPTIONS_ACTIVE, NULL))
-                  label = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_GAME_SPECIFIC_OPTIONS_CREATE);
-               else
-                  label = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_GAME_SPECIFIC_OPTIONS_IN_USE);
+               QHBoxLayout *gameOptionsLayout = new QHBoxLayout();
+               QPushButton *button = new QPushButton(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_SAVE), this);
 
-               if (!label.isEmpty())
-               {
-                  QHBoxLayout *gameOptionsLayout = new QHBoxLayout();
-                  QPushButton *button = new QPushButton(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_SAVE), this);
+               connect(button, SIGNAL(clicked()), this, SLOT(onSaveGameSpecificOptions()));
 
-                  connect(button, SIGNAL(clicked()), this, SLOT(onSaveGameSpecificOptions()));
+               gameOptionsLayout->addWidget(new QLabel(contentLabel, this));
+               gameOptionsLayout->addSpacerItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Preferred));
+               gameOptionsLayout->addWidget(button);
 
-                  gameOptionsLayout->addWidget(new QLabel(contentLabel, this));
-                  gameOptionsLayout->addSpacerItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Preferred));
-                  gameOptionsLayout->addWidget(button);
-
-                  form->addRow(label, gameOptionsLayout);
-               }
+               form->addRow(label, gameOptionsLayout);
             }
          }
+      }
 
-         retroarch_ctl(RARCH_CTL_CORE_OPTIONS_LIST_GET, &coreopts);
+      retroarch_ctl(RARCH_CTL_CORE_OPTIONS_LIST_GET, &coreopts);
 
-         if (coreopts)
+      if (coreopts)
+      {
+         QToolButton *resetAllButton = new QToolButton(this);
+
+         resetAllButton->setDefaultAction(new QAction(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_RESET_ALL), this));
+         connect(resetAllButton, SIGNAL(clicked()), this, SLOT(onCoreOptionResetAllClicked()));
+
+         for (j = 0; j < opts; j++)
          {
-            QToolButton *resetAllButton = new QToolButton(this);
+            QString desc               = 
+               core_option_manager_get_desc(coreopts, j, false);
+            QString val                = 
+               core_option_manager_get_val(coreopts, j);
+            QComboBox *combo_box       = NULL;
+            QLabel *descLabel          = NULL;
+            QHBoxLayout *comboLayout   = NULL;
+            QToolButton *resetButton   = NULL;
+            struct core_option *option = NULL;
 
-            resetAllButton->setDefaultAction(new QAction(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_RESET_ALL), this));
-            connect(resetAllButton, SIGNAL(clicked()), this, SLOT(onCoreOptionResetAllClicked()));
+            if (desc.isEmpty() || !coreopts->opts)
+               continue;
 
-            for (j = 0; j < opts; j++)
+            option = static_cast<struct core_option*>(&coreopts->opts[j]);
+
+            if (!option->vals || option->vals->size == 0)
+               continue;
+
+            comboLayout = new QHBoxLayout();
+            descLabel   = new QLabel(desc, this);
+            combo_box   = new QComboBox(this);
+            combo_box->setObjectName("coreOptionComboBox");
+            resetButton = new QToolButton(this);
+            resetButton->setObjectName("resetButton");
+            resetButton->setDefaultAction(new QAction(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_RESET), this));
+            resetButton->setProperty("comboBox",
+                  QVariant::fromValue(combo_box));
+
+            connect(resetButton, SIGNAL(clicked()),
+                  this, SLOT(onCoreOptionResetClicked()));
+
+            if (!string_is_empty(option->info))
             {
-               QString desc               = 
-                  core_option_manager_get_desc(coreopts, j, false);
-               QString val                = 
-                  core_option_manager_get_val(coreopts, j);
-               QComboBox *combo_box       = NULL;
-               QLabel *descLabel          = NULL;
-               QHBoxLayout *comboLayout   = NULL;
-               QToolButton *resetButton   = NULL;
-               struct core_option *option = NULL;
+               char *new_info;
+               size_t option_info_len = strlen(option->info);
+               size_t new_info_len    = option_info_len + 1;
 
-               if (desc.isEmpty() || !coreopts->opts)
-                  continue;
+               if (!(new_info = (char *)malloc(new_info_len)))
+                  return;
+               new_info[0] = '\0';
 
-               option = static_cast<struct core_option*>(&coreopts->opts[j]);
-
-               if (!option->vals || option->vals->size == 0)
-                  continue;
-
-               comboLayout = new QHBoxLayout();
-               descLabel   = new QLabel(desc, this);
-               combo_box   = new QComboBox(this);
-               combo_box->setObjectName("coreOptionComboBox");
-               resetButton = new QToolButton(this);
-               resetButton->setObjectName("resetButton");
-               resetButton->setDefaultAction(new QAction(msg_hash_to_str(MENU_ENUM_LABEL_VALUE_QT_RESET), this));
-               resetButton->setProperty("comboBox",
-                     QVariant::fromValue(combo_box));
-
-               connect(resetButton, SIGNAL(clicked()),
-                     this, SLOT(onCoreOptionResetClicked()));
-
-               if (!string_is_empty(option->info))
-               {
-                  char *new_info;
-                  size_t option_info_len = strlen(option->info);
-                  size_t new_info_len    = option_info_len + 1;
-
-                  if (!(new_info = (char *)malloc(new_info_len)))
-                     return;
-                  new_info[0] = '\0';
-
-                  word_wrap(new_info, new_info_len, option->info,
-                        option_info_len, 50, 100, 0);
-                  descLabel->setToolTip(new_info);
-                  combo_box->setToolTip(new_info);
-                  free(new_info);
-               }
-
-               for (k = 0; k < option->vals->size; k++)
-                  combo_box->addItem(option->vals->elems[k].data, option->key);
-
-               combo_box->setCurrentText(val);
-               combo_box->setProperty("default_index",
-                     static_cast<unsigned>(option->default_index));
-
-               /* Only connect the signal after setting the default item */
-               connect(combo_box, SIGNAL(currentIndexChanged(int)),
-                     this,
-                     SLOT(onCoreOptionComboBoxCurrentIndexChanged(int)));
-
-               comboLayout->addWidget(combo_box);
-               comboLayout->addWidget(resetButton);
-
-               form->addRow(descLabel, comboLayout);
+               word_wrap(new_info, new_info_len, option->info,
+                     option_info_len, 50, 100, 0);
+               descLabel->setToolTip(new_info);
+               combo_box->setToolTip(new_info);
+               free(new_info);
             }
 
-            form->addRow(resetAllButton, new QWidget(this));
+            for (k = 0; k < option->vals->size; k++)
+               combo_box->addItem(option->vals->elems[k].data, option->key);
 
-            m_layout->addLayout(form);
+            combo_box->setCurrentText(val);
+            combo_box->setProperty("default_index",
+                  static_cast<unsigned>(option->default_index));
+
+            /* Only connect the signal after setting the default item */
+            connect(combo_box, SIGNAL(currentIndexChanged(int)),
+                  this,
+                  SLOT(onCoreOptionComboBoxCurrentIndexChanged(int)));
+
+            comboLayout->addWidget(combo_box);
+            comboLayout->addWidget(resetButton);
+
+            form->addRow(descLabel, comboLayout);
          }
+
+         form->addRow(resetAllButton, new QWidget(this));
+
+         m_layout->addLayout(form);
       }
    }
 
@@ -1508,7 +1502,7 @@ void ShaderParamsDialog::onFilterComboBoxIndexChanged(int)
             if (video_shader)
                video_shader->pass[pass].filter = filter;
 
-            video_shader->modified = true;
+            video_shader->flags |= SHDR_FLAG_MODIFIED;
 
             command_event(CMD_EVENT_SHADERS_APPLY_CHANGES, NULL);
          }
@@ -1552,19 +1546,25 @@ void ShaderParamsDialog::onScaleComboBoxIndexChanged(int)
          {
             if (menu_shader)
             {
-               menu_shader->pass[pass].fbo.scale_x = scale;
-               menu_shader->pass[pass].fbo.scale_y = scale;
-               menu_shader->pass[pass].fbo.valid = scale;
+               menu_shader->pass[pass].fbo.scale_x   = scale;
+               menu_shader->pass[pass].fbo.scale_y   = scale;
+               if (scale)
+                  menu_shader->pass[pass].fbo.flags |=  FBO_SCALE_FLAG_VALID;
+               else
+                  menu_shader->pass[pass].fbo.flags &= ~FBO_SCALE_FLAG_VALID;
             }
 
             if (video_shader)
             {
-               video_shader->pass[pass].fbo.scale_x = scale;
-               video_shader->pass[pass].fbo.scale_y = scale;
-               video_shader->pass[pass].fbo.valid = scale;
+               video_shader->pass[pass].fbo.scale_x   = scale;
+               video_shader->pass[pass].fbo.scale_y   = scale;
+               if (scale)
+                  video_shader->pass[pass].fbo.flags |=  FBO_SCALE_FLAG_VALID;
+               else
+                  video_shader->pass[pass].fbo.flags &= ~FBO_SCALE_FLAG_VALID;
             }
 
-            video_shader->modified = true;
+            video_shader->flags |= SHDR_FLAG_MODIFIED;
 
             command_event(CMD_EVENT_SHADERS_APPLY_CHANGES, NULL);
          }
@@ -1642,7 +1642,7 @@ void ShaderParamsDialog::onShaderPassMoveDownClicked()
       memcpy(&menu_shader->pass[pass + 1], tempPass.pass, sizeof(struct video_shader_pass));
    }
 
-   menu_shader->modified = true;
+   menu_shader->flags |= SHDR_FLAG_MODIFIED;
 
    reload();
 }
@@ -1717,7 +1717,7 @@ void ShaderParamsDialog::onShaderPassMoveUpClicked()
       memcpy(&menu_shader->pass[pass], tempPass.pass, sizeof(struct video_shader_pass));
    }
 
-   menu_shader->modified = true;
+   menu_shader->flags |= SHDR_FLAG_MODIFIED;
 
    reload();
 }
@@ -1824,7 +1824,7 @@ void ShaderParamsDialog::onShaderResetPass(int pass)
          param->current = param->initial;
       }
 
-      video_shader->modified = true;
+      video_shader->flags |= SHDR_FLAG_MODIFIED;
    }
 
    reload();
@@ -1870,7 +1870,7 @@ void ShaderParamsDialog::onShaderResetParameter(QString parameter)
       if (param)
          param->current = param->initial;
 
-      video_shader->modified = true;
+      video_shader->flags |= SHDR_FLAG_MODIFIED;
    }
 
    reload();
@@ -1940,7 +1940,7 @@ void ShaderParamsDialog::onShaderAddPassClicked()
    else
       return;
 
-   menu_shader->modified = true;
+   menu_shader->flags   |= SHDR_FLAG_MODIFIED;
    shader_pass           = &menu_shader->pass[menu_shader->passes - 1];
 
    if (!shader_pass)
@@ -2121,7 +2121,7 @@ void ShaderParamsDialog::onShaderRemoveAllPassesClicked()
       return;
 
    menu_shader->passes   = 0;
-   menu_shader->modified = true;
+   menu_shader->flags   |= SHDR_FLAG_MODIFIED;
 
    onShaderApplyClicked();
 }
@@ -2168,7 +2168,7 @@ void ShaderParamsDialog::onShaderRemovePass(int pass)
 
    menu_shader->passes--;
 
-   menu_shader->modified = true;
+   menu_shader->flags   |= SHDR_FLAG_MODIFIED;
 
    onShaderApplyClicked();
 }
@@ -2619,7 +2619,7 @@ void ShaderParamsDialog::addShaderParam(struct video_shader_parameter *param, QF
       QSpinBox *spinBox             = NULL;
       QHBoxLayout *box              = new QHBoxLayout();
       QSlider *slider               = new QSlider(Qt::Horizontal, this);
-      double value                  = MainWindow::lerp(
+      double value                  = lerp(
             param->minimum, param->maximum, 0, 100, param->current);
       double intpart                = 0;
       bool stepIsFractional         = modf(param->step, &intpart);
@@ -2720,7 +2720,7 @@ void ShaderParamsDialog::onShaderParamCheckBoxClicked()
             param->current = (checkBox->isChecked() ? param->maximum : param->minimum);
       }
 
-      video_shader->modified = true;
+      video_shader->flags   |= SHDR_FLAG_MODIFIED;
    }
 }
 
@@ -2760,7 +2760,7 @@ void ShaderParamsDialog::onShaderParamSliderValueChanged(int)
 
          if (param)
          {
-            newValue = MainWindow::lerp(0, 100, param->minimum, param->maximum, slider->value());
+            newValue = lerp(0, 100, param->minimum, param->maximum, slider->value());
             newValue = round(newValue / param->step) * param->step;
             param->current = newValue;
          }
@@ -2781,12 +2781,12 @@ void ShaderParamsDialog::onShaderParamSliderValueChanged(int)
 
          if (param)
          {
-            newValue = MainWindow::lerp(0, 100, param->minimum, param->maximum, slider->value());
+            newValue = lerp(0, 100, param->minimum, param->maximum, slider->value());
             newValue = round(newValue / param->step) * param->step;
             param->current = newValue;
          }
 
-         video_shader->modified = true;
+         video_shader->flags   |= SHDR_FLAG_MODIFIED;
       }
 
    }
@@ -2863,7 +2863,7 @@ void ShaderParamsDialog::onShaderParamSpinBoxValueChanged(int value)
          if (param)
          {
             param->current = value;
-            newValue       = MainWindow::lerp(
+            newValue       = lerp(
                   param->minimum, param->maximum, 0, 100, param->current);
             slider->blockSignals(true);
             slider->setValue(newValue);
@@ -2887,14 +2887,14 @@ void ShaderParamsDialog::onShaderParamSpinBoxValueChanged(int value)
          if (param)
          {
             param->current = value;
-            newValue       = MainWindow::lerp(
+            newValue       = lerp(
                   param->minimum, param->maximum, 0, 100, param->current);
             slider->blockSignals(true);
             slider->setValue(newValue);
             slider->blockSignals(false);
          }
 
-         video_shader->modified = true;
+         video_shader->flags   |= SHDR_FLAG_MODIFIED;
       }
    }
 }
@@ -2946,7 +2946,7 @@ void ShaderParamsDialog::onShaderParamDoubleSpinBoxValueChanged(double value)
          if (param)
          {
             param->current = value;
-            newValue = MainWindow::lerp(
+            newValue       = lerp(
                   param->minimum, param->maximum, 0, 100, param->current);
             slider->blockSignals(true);
             slider->setValue(newValue);
@@ -2970,14 +2970,14 @@ void ShaderParamsDialog::onShaderParamDoubleSpinBoxValueChanged(double value)
          if (param)
          {
             param->current = value;
-            newValue       = MainWindow::lerp(
+            newValue       = lerp(
                   param->minimum, param->maximum, 0, 100, param->current);
             slider->blockSignals(true);
             slider->setValue(newValue);
             slider->blockSignals(false);
          }
 
-         video_shader->modified = true;
+         video_shader->flags   |= SHDR_FLAG_MODIFIED;
       }
    }
 }

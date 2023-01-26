@@ -43,13 +43,13 @@
 #ifndef IS_SALAMANDER
 #include <lists/file_list.h>
 #endif
+#include <defines/ps3_defines.h>
 
 #include "../frontend_driver.h"
-#include "../../file_path_special.h"
-#include <defines/ps3_defines.h>
 #include "../../defaults.h"
-#include "../../verbosity.h"
+#include "../../file_path_special.h"
 #include "../../paths.h"
+#include "../../verbosity.h"
 
 #if !defined(IS_SALAMANDER) && defined(HAVE_NETWORKING)
 #include "../../network/netplay/netplay.h"
@@ -139,6 +139,12 @@ static void fill_derived_paths(void)
 		       g_defaults.dirs[DEFAULT_DIR_CORE],
 		       "info",
 		       sizeof(g_defaults.dirs[DEFAULT_DIR_CORE_INFO]));
+    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG],
+		       g_defaults.dirs[DEFAULT_DIR_CORE],
+		       "config", sizeof(g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG]));
+    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP],
+		       g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG],
+		       "remaps", sizeof(g_defaults.dirs[DEFAULT_DIR_REMAP]));
     fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SAVESTATE],
 		       g_defaults.dirs[DEFAULT_DIR_CORE],
 		       "savestates", sizeof(g_defaults.dirs[DEFAULT_DIR_SAVESTATE]));
@@ -164,9 +170,6 @@ static void fill_derived_paths(void)
     fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_ASSETS],
 		       g_defaults.dirs[DEFAULT_DIR_CORE],
 		       "assets", sizeof(g_defaults.dirs[DEFAULT_DIR_ASSETS]));
-    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR],
-		       g_defaults.dirs[DEFAULT_DIR_CORE],
-		       "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
     fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE],
 		       g_defaults.dirs[DEFAULT_DIR_CORE],
 		       "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
@@ -263,9 +266,9 @@ static void frontend_ps3_get_env(int *argc, char *argv[],
       params->state_path    = NULL;
       params->config_path   = NULL;
       params->libretro_path = NULL;
-      params->verbose       = false;
-      params->no_content    = false;
-      params->touched       = true;
+      params->flags        &= ~(RARCH_MAIN_WRAP_FLAG_VERBOSE
+                              | RARCH_MAIN_WRAP_FLAG_NO_CONTENT);
+      params->flags        |=   RARCH_MAIN_WRAP_FLAG_TOUCHED;
    }
 #endif
 #endif
@@ -417,7 +420,7 @@ static int frontend_ps3_exec_exitspawn(const char *path,
 #else
    ret = -1;
 #endif
-   
+
    if (ret <  0)
    {
       RARCH_WARN("SELF file is not of NPDRM type, trying another approach to boot it...\n");

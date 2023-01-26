@@ -288,6 +288,8 @@ MSG_HASH(
 
 #if defined(HAVE_DINPUT) || defined(HAVE_WINRAWINPUT)
 #endif
+#ifdef ANDROID
+#endif
 
 /* Settings > Input > Haptic Feedback/Vibration */
 
@@ -295,13 +297,19 @@ MSG_HASH(
 /* Settings > Input > Menu Controls */
 
 
-
 /* Settings > Input > Hotkeys */
 
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_META_QUIT_KEY,
-   "Quitar RetroArch"
-   )
+
+
+
+
+
+
+
+
+
+
+
 
 /* Settings > Input > Port # Controls */
 
@@ -402,6 +410,12 @@ MSG_HASH(
 /* Settings > Power Management */
 
 /* Settings > Achievements */
+
+
+/* Settings > Achievements > Appearance */
+
+
+/* Settings > Achievements > Visibility */
 
 
 /* Settings > Network */

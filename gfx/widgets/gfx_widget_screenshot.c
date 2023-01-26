@@ -19,7 +19,6 @@
 #include "../gfx_animation.h"
 #include "../gfx_display.h"
 #include "../../configuration.h"
-#include "../../retroarch.h"
 
 #define SCREENSHOT_DURATION_IN            66
 #define SCREENSHOT_DURATION_OUT           SCREENSHOT_DURATION_IN*10
@@ -193,6 +192,11 @@ static void gfx_widget_screenshot_free(void)
    gfx_widget_screenshot_dispose(NULL);
 }
 
+static void gfx_widget_screenshot_context_destroy(void)
+{
+   gfx_widget_screenshot_dispose(NULL);
+}
+
 static void gfx_widget_screenshot_frame(void* data, void *user_data)
 {
    static float pure_white[16]          = {
@@ -262,6 +266,7 @@ static void gfx_widget_screenshot_frame(void* data, void *user_data)
       ticker.s          = shotname;
       ticker.selected   = true;
       ticker.str        = state->shotname;
+      ticker.spacer     = NULL;
 
       gfx_animation_ticker(&ticker);
 
@@ -378,7 +383,7 @@ const gfx_widget_t gfx_widget_screenshot = {
    gfx_widget_screenshot_init,
    gfx_widget_screenshot_free,
    NULL, /* context_reset*/
-   NULL, /* context_destroy */
+   gfx_widget_screenshot_context_destroy,
    NULL, /* layout */
    gfx_widget_screenshot_iterate,
    gfx_widget_screenshot_frame

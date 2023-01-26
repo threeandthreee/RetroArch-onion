@@ -47,6 +47,7 @@
 #ifndef IS_SALAMANDER
 #include <lists/file_list.h>
 #endif
+#include <defines/psp_defines.h>
 
 #ifdef HAVE_MENU
 #include "../../menu/menu_driver.h"
@@ -55,9 +56,8 @@
 #include "../frontend_driver.h"
 #include "../../defaults.h"
 #include "../../file_path_special.h"
-#include <defines/psp_defines.h>
-#include "../../retroarch.h"
 #include "../../paths.h"
+#include "../../retroarch.h"
 #include "../../verbosity.h"
 
 #if !defined(IS_SALAMANDER) && defined(HAVE_NETWORKING)
@@ -78,12 +78,11 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER|THREAD_ATTR_VFPU);
 #endif
 
 #ifdef SCE_LIBC_SIZE
-unsigned int sceLibcHeapSize = SCE_LIBC_SIZE;
+unsigned int sceLibcHeapSize            = SCE_LIBC_SIZE;
 #endif
 
-char eboot_path[512];
-char user_path[512];
-
+static char eboot_path[512]             = {0};
+static char user_path[512]              = {0};
 static enum frontend_fork psp_fork_mode = FRONTEND_FORK_NONE;
 
 static void frontend_psp_get_env_settings(int *argc, char *argv[],
@@ -111,8 +110,6 @@ static void frontend_psp_get_env_settings(int *argc, char *argv[],
       sizeof(g_defaults.dirs[DEFAULT_DIR_ASSETS]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], user_path,
       "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], user_path,
-      "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CHEATS], user_path, "cheats",
       sizeof(g_defaults.dirs[DEFAULT_DIR_CHEATS]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG], user_path,
@@ -121,8 +118,8 @@ static void frontend_psp_get_env_settings(int *argc, char *argv[],
       "downloads", sizeof(g_defaults.dirs[DEFAULT_DIR_CORE_ASSETS]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_PLAYLIST], user_path,
       "playlists", sizeof(g_defaults.dirs[DEFAULT_DIR_PLAYLIST]));
-   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP], user_path, "remaps",
-      sizeof(g_defaults.dirs[DEFAULT_DIR_REMAP]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP], g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG],
+      "remaps", sizeof(g_defaults.dirs[DEFAULT_DIR_REMAP]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SRAM], user_path,
       "savefiles", sizeof(g_defaults.dirs[DEFAULT_DIR_SRAM]));
    fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SAVESTATE], user_path,
@@ -203,9 +200,9 @@ static void frontend_psp_get_env_settings(int *argc, char *argv[],
       params->state_path    = NULL;
       params->config_path   = NULL;
       params->libretro_path = NULL;
-      params->verbose       = false;
-      params->no_content    = false;
-      params->touched       = true;
+      params->flags        &= ~(RARCH_MAIN_WRAP_FLAG_VERBOSE
+                              | RARCH_MAIN_WRAP_FLAG_NO_CONTENT);
+      params->flags        |=   RARCH_MAIN_WRAP_FLAG_TOUCHED;
    }
 
    dir_check_defaults("custom.ini");
@@ -295,7 +292,7 @@ static void frontend_psp_init(void *data)
 
 #endif
 
-#if defined(PSP) && defined(HAVE_KERNEL_PRX) 
+#if defined(PSP) && defined(HAVE_KERNEL_PRX)
    pspSdkLoadStartModule("kernel_functions.prx", PSP_MEMORY_PARTITION_KERNEL);
 #endif
 }

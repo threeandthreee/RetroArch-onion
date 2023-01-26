@@ -1434,17 +1434,19 @@ bool vulkan_filter_chain::init_feedback()
 
 bool vulkan_filter_chain::init_alias()
 {
-   unsigned i, j;
+   int i;
+   
    common.texture_semantic_map.clear();
    common.texture_semantic_uniform_map.clear();
 
    for (i = 0; i < passes.size(); i++)
    {
+      unsigned j;
       const std::string name = passes[i]->get_name();
       if (name.empty())
          continue;
 
-      j = &passes[i] - passes.data();
+      j = (unsigned)(&passes[i] - passes.data());
 
       if (!slang_set_unique_map(
                common.texture_semantic_map, name,
@@ -1469,7 +1471,7 @@ bool vulkan_filter_chain::init_alias()
 
    for (i = 0; i < common.luts.size(); i++)
    {
-      j = &common.luts[i] - common.luts.data();
+      unsigned j = (unsigned)(&common.luts[i] - common.luts.data());
       if (!slang_set_unique_map(
                common.texture_semantic_map,
                common.luts[i]->get_id(),
@@ -1517,7 +1519,7 @@ void vulkan_filter_chain::set_num_passes(unsigned num_passes)
    for (i = 0; i < num_passes; i++)
    {
       passes.emplace_back(new Pass(device, memory_properties,
-               cache, deferred_calls.size(), i + 1 == num_passes));
+               cache, (unsigned)deferred_calls.size(), i + 1 == num_passes));
       passes.back()->set_common_resources(&common);
       passes.back()->set_pass_number(i);
    }
@@ -1922,7 +1924,7 @@ bool Pass::init_pipeline_layout()
       }
    }
 
-   set_layout_info.bindingCount           = bindings.size();
+   set_layout_info.bindingCount           = (uint32_t)bindings.size();
    set_layout_info.pBindings              = bindings.data();
 
    if (vkCreateDescriptorSetLayout(device,
@@ -1950,14 +1952,14 @@ bool Pass::init_pipeline_layout()
    }
 
    push.stages     = push_range.stageFlags;
-   push_range.size = reflection.push_constant_size;
+   push_range.size = (uint32_t)reflection.push_constant_size;
 
    if (vkCreatePipelineLayout(device,
             &layout_info, NULL, &pipeline_layout) != VK_SUCCESS)
       return false;
 
    pool_info.maxSets                    = num_sync_indices;
-   pool_info.poolSizeCount              = desc_counts.size();
+   pool_info.poolSizeCount              = (uint32_t)desc_counts.size();
    pool_info.pPoolSizes                 = desc_counts.data();
    if (vkCreateDescriptorPool(device, &pool_info, nullptr, &pool) != VK_SUCCESS)
       return false;
@@ -2600,7 +2602,7 @@ void Pass::build_commands(
    if (push.stages != 0)
    {
       vkCmdPushConstants(cmd, pipeline_layout,
-            push.stages, 0, reflection.push_constant_size,
+            push.stages, 0, (uint32_t)reflection.push_constant_size,
             push.buffer.data());
    }
 
@@ -2898,7 +2900,8 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
     if (!video_shader_load_preset_into_shader(path, shader.get()))
         return nullptr;
 
-   bool last_pass_is_fbo = shader->pass[shader->passes - 1].fbo.valid;
+   bool last_pass_is_fbo = shader->pass[shader->passes - 1].fbo.flags &
+      FBO_SCALE_FLAG_VALID;
    auto tmpinfo          = *info;
    tmpinfo.num_passes    = shader->passes + (last_pass_is_fbo ? 1 : 0);
 
@@ -2964,7 +2967,7 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
                      itr->id);
                goto error;
             }
-            chain->add_parameter(i, itr - shader->parameters, meta_param.id);
+            chain->add_parameter(i, (unsigned)(itr - shader->parameters), meta_param.id);
          }
          else
          {
@@ -3029,7 +3032,7 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
       if (output.meta.rt_format == SLANG_FORMAT_UNKNOWN)
          output.meta.rt_format     = SLANG_FORMAT_R8G8B8A8_UNORM;
 
-      if (!pass->fbo.valid)
+      if (!(pass->fbo.flags & FBO_SCALE_FLAG_VALID))
       {
          pass_info.scale_type_x    = GLSLANG_FILTER_CHAIN_SCALE_SOURCE;
          pass_info.scale_type_y    = GLSLANG_FILTER_CHAIN_SCALE_SOURCE;
@@ -3067,9 +3070,9 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
       {
          /* Preset overrides shader.
           * Kinda ugly ... */
-         if (pass->fbo.srgb_fbo)
+         if (pass->fbo.flags & FBO_SCALE_FLAG_SRGB_FBO)
             output.meta.rt_format = SLANG_FORMAT_R8G8B8A8_SRGB;
-         else if (pass->fbo.fp_fbo)
+         else if (pass->fbo.flags & FBO_SCALE_FLAG_FP_FBO)
             output.meta.rt_format = SLANG_FORMAT_R16G16B16A16_SFLOAT;
 
          pass_info.rt_format      = glslang_format_to_vk(output.meta.rt_format);

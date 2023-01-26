@@ -44,6 +44,7 @@
 #include "../../driver.h"
 
 #include "../../retroarch.h"
+#include "../../runloop.h"
 #include "../../verbosity.h"
 
 #include "../common/ctr_common.h"
@@ -58,6 +59,13 @@ enum
    CTR_TEXTURE_LAST
 };
 
+struct ctr_bottom_texture_data
+{
+   uintptr_t texture;
+   ctr_vertex_t* frame_coords;
+   ctr_scale_vector_t scale_vector;
+};
+
 /* TODO/FIXME - global referenced outside */
 extern uint64_t lifecycle_state;
 
@@ -65,8 +73,8 @@ extern uint64_t lifecycle_state;
  * Have to keep track of bottom screen enable state
  * externally, otherwise cannot detect current state
  * when reinitialising... */
-bool ctr_bottom_screen_enabled  = true;
-static int fadeCount            = 256;
+static bool ctr_bottom_screen_enabled  = true;
+static int fade_count                  = 256;
 
 static void ctr_set_bottom_screen_enable(bool enabled, bool idle);
 
@@ -164,7 +172,7 @@ static INLINE void ctr_set_screen_coords(ctr_video_t * ctr)
 static void ctr_render_overlay(void *data);
 static void ctr_free_overlay(ctr_video_t *ctr)
 {
-   unsigned i;
+   int i;
 
    for (i = 0; i < ctr->overlays; i++)
    {
@@ -270,7 +278,7 @@ static const char *ctr_texture_path(unsigned id)
             static char texture_path[PATH_MAX_LENGTH];
             char state_path[PATH_MAX_LENGTH];
 
-            if (!retroarch_get_current_savestate_path(state_path, 
+            if (!runloop_get_current_savestate_path(state_path, 
                      sizeof(state_path)))
                return NULL;
 
@@ -312,7 +320,7 @@ static bool ctr_update_state_date_from_file(void *data)
    struct tm *t     = NULL;
    ctr_video_t *ctr = (ctr_video_t*)data;
 
-   if (!retroarch_get_current_savestate_path(
+   if (!runloop_get_current_savestate_path(
             state_path, sizeof(state_path)))
       return false;
 
@@ -348,6 +356,7 @@ static void ctr_state_thumbnail_geom(void *data)
    float scale;
    unsigned width, height;
    int x_offset, y_offset;
+   ctr_scale_vector_t *vec           = NULL;
    ctr_texture_t *texture            = NULL;
    ctr_video_t *ctr                  = (ctr_video_t *)data;
    struct ctr_bottom_texture_data *o = NULL;
@@ -382,8 +391,10 @@ static void ctr_state_thumbnail_geom(void *data)
                          + texture->active_width * scale;
    o->frame_coords->y1 =   o->frame_coords->y0 
                          + texture->active_height * scale;
+   vec                 = &o->scale_vector;
 
-   ctr_set_scale_vector(&o->scale_vector,
+   CTR_SET_SCALE_VECTOR(
+         vec,
          CTR_BOTTOM_FRAMEBUFFER_WIDTH,
          CTR_BOTTOM_FRAMEBUFFER_HEIGHT,
          texture->width,
@@ -419,7 +430,8 @@ static bool ctr_load_bottom_texture(void *data)
          }
          else
          {
-            ctr_texture_t *texture = (ctr_texture_t *) o->texture;
+            ctr_scale_vector_t *vec = NULL;
+            ctr_texture_t *texture  = (ctr_texture_t *)o->texture;
 
             o->frame_coords->u0 = 0;
             o->frame_coords->v0 = 0;
@@ -431,7 +443,9 @@ static bool ctr_load_bottom_texture(void *data)
             o->frame_coords->x1 = o->frame_coords->x0 + texture->width;
             o->frame_coords->y1 = o->frame_coords->y0 + texture->height;
 
-            ctr_set_scale_vector(&o->scale_vector,
+            vec                 = &o->scale_vector;
+
+            CTR_SET_SCALE_VECTOR(vec,
                   CTR_BOTTOM_FRAMEBUFFER_WIDTH,
                   CTR_BOTTOM_FRAMEBUFFER_HEIGHT,
                   texture->width,
@@ -449,7 +463,7 @@ static void save_state_to_file(void *data)
 {
    char state_path[PATH_MAX_LENGTH];
    ctr_video_t *ctr = (ctr_video_t*)data;
-   retroarch_get_current_savestate_path(state_path, sizeof(state_path));
+   runloop_get_current_savestate_path(state_path, sizeof(state_path));
 
    command_event(CMD_EVENT_RAM_STATE_TO_FILE, state_path);
 }
@@ -461,6 +475,7 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
    ctr_video_t *ctr     = (ctr_video_t*)data;
    settings_t *settings = config_get_ptr();
    int config_slot      = settings->ints.state_slot;
+   uint32_t flags       = runloop_get_flags();
 
    if (!ctr->init_bottom_menu)
    {
@@ -475,7 +490,7 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
 
    BIT64_CLEAR(lifecycle_state, RARCH_MENU_TOGGLE);
 
-   if (!retroarch_ctl(RARCH_CTL_CORE_IS_RUNNING, NULL))
+   if (!(flags & RUNLOOP_FLAG_CORE_RUNNING))
    {
       if (!ctr->bottom_is_idle)
       {
@@ -513,14 +528,14 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
       {
          ctr->bottom_is_idle   = false;
          ctr->bottom_is_fading = false;
-         fadeCount             = 256;
+         fade_count            = 256;
          ctr_set_bottom_screen_enable(true,true);
       }
       else if (ctr->bottom_check_idle)
       {
          ctr->bottom_check_idle = false;
          ctr->bottom_is_fading  = false;
-         fadeCount              = 256;
+         fade_count             = 256;
       }
 
       if (ctr->bottom_menu == CTR_BOTTOM_MENU_NOT_AVAILABLE)
@@ -618,8 +633,8 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
       ctr->refresh_bottom_menu = true;
    }
 
-   if (ctr->bottom_menu == CTR_BOTTOM_MENU_NOT_AVAILABLE ||
-         !retroarch_ctl(RARCH_CTL_CORE_IS_RUNNING, NULL))
+   if (      ctr->bottom_menu == CTR_BOTTOM_MENU_NOT_AVAILABLE
+         || (!(flags & RUNLOOP_FLAG_CORE_RUNNING)))
       return;
 
 
@@ -644,7 +659,7 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
 
       if (ctr_update_state_date_from_file(ctr))
       {
-         if(gfx_display_reset_textures_list(
+         if (gfx_display_reset_textures_list(
                   ctr_texture_path(CTR_TEXTURE_STATE_THUMBNAIL),
                   dir_get_ptr(RARCH_DIR_SAVESTATE),
                   &o->texture,
@@ -660,7 +675,7 @@ static void bottom_menu_control(void* data, bool lcd_bottom)
    }
 
 #ifdef HAVE_MENU
-   if (menu_state_get_ptr()->alive)
+   if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
       ctr->bottom_menu = CTR_BOTTOM_MENU_SELECT;
    else
 #endif
@@ -917,17 +932,17 @@ static void ctr_set_bottom_screen_idle(ctr_video_t * ctr)
          return;
       }
 
-      if ( fadeCount > 0 )
+      if (fade_count > 0)
       {
-         fadeCount--;
-         ctr_fade_bottom_screen(GFX_BOTTOM, GFX_LEFT, fadeCount);
+         fade_count--;
+         ctr_fade_bottom_screen(GFX_BOTTOM, GFX_LEFT, fade_count);
 
-         if ( fadeCount <= 128 )
+         if (fade_count <= 128)
          {
             ctr->bottom_is_idle    = true;
             ctr->bottom_is_fading  = false;
             ctr->bottom_check_idle = false;
-            fadeCount              = 256;
+            fade_count             = 256;
             ctr_set_bottom_screen_enable(false,true);
             return;
          }
@@ -942,7 +957,7 @@ static void ctr_set_bottom_screen_enable(bool enabled, bool idle)
    u8 not_2DS;
 
    CFGU_GetModelNintendo2DS(&not_2DS);
-   if(not_2DS && srvGetServiceHandle(&lcd_handle, "gsp::Lcd") >= 0)
+   if (not_2DS && srvGetServiceHandle(&lcd_handle, "gsp::Lcd") >= 0)
    {
       u32 *cmdbuf = getThreadCommandBuffer();
       cmdbuf[0]   = enabled? 0x00110040:  0x00120040;
@@ -1037,7 +1052,7 @@ static void ctr_lcd_aptHook(APT_HookType hook, void* param)
    }
 
 #ifdef HAVE_MENU
-   if (menu_state_get_ptr()->alive)
+   if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
       return;
 #endif
 
@@ -1074,6 +1089,8 @@ static void* ctr_init(const video_info_t* video,
 {
    size_t i;
    float refresh_rate;
+   ctr_scale_vector_t *vec         = NULL;
+   ctr_scale_vector_t *menu_vec    = NULL;
    u8 device_model                 = 0xFF;
    void* ctrinput                  = NULL;
    settings_t *settings            = config_get_ptr();
@@ -1162,13 +1179,19 @@ static void* ctr_init(const video_info_t* video,
    ctr->menu.frame_coords->u1      = CTR_TOP_FRAMEBUFFER_WIDTH - 80;
    ctr->menu.frame_coords->v1      = CTR_TOP_FRAMEBUFFER_HEIGHT;
    GSPGPU_FlushDataCache(ctr->menu.frame_coords, sizeof(ctr_vertex_t));
+   vec                             = &ctr->scale_vector;
+   menu_vec                        = &ctr->menu.scale_vector;
 
-   ctr_set_scale_vector(&ctr->scale_vector,
-                        CTR_TOP_FRAMEBUFFER_WIDTH, CTR_TOP_FRAMEBUFFER_HEIGHT,
-                        ctr->texture_width, ctr->texture_height);
-   ctr_set_scale_vector(&ctr->menu.scale_vector,
-                        CTR_TOP_FRAMEBUFFER_WIDTH, CTR_TOP_FRAMEBUFFER_HEIGHT,
-                        ctr->menu.texture_width, ctr->menu.texture_height);
+   CTR_SET_SCALE_VECTOR(vec,
+                        CTR_TOP_FRAMEBUFFER_WIDTH,
+                        CTR_TOP_FRAMEBUFFER_HEIGHT,
+                        ctr->texture_width,
+                        ctr->texture_height);
+   CTR_SET_SCALE_VECTOR(menu_vec,
+                        CTR_TOP_FRAMEBUFFER_WIDTH,
+                        CTR_TOP_FRAMEBUFFER_HEIGHT,
+                        ctr->menu.texture_width,
+                        ctr->menu.texture_height);
 
    memset(ctr->texture_linear, 0x00, ctr->texture_width * ctr->texture_height * (ctr->rgb32? 4:2));
 #if 0
@@ -1280,7 +1303,7 @@ static bool ctr_frame(void* data, const void* frame,
       uint64_t frame_count,
       unsigned pitch, const char* msg, video_frame_info_t *video_info)
 {
-   static uint64_t currentTick,lastTick;
+   static uint64_t current_tick, last_tick;
    extern GSPGPU_FramebufferInfo topFramebufferInfo, bottomFramebufferInfo;
    extern u8* gfxSharedMemory;
    extern u8 gfxThreadID;
@@ -1308,6 +1331,7 @@ static bool ctr_frame(void* data, const void* frame,
 #endif
    bool overlay_behind_menu       = video_info->overlay_behind_menu;
    bool lcd_bottom                = false;
+   uint32_t flags                 = runloop_get_flags();
 
    if (!width || !height || !settings)
    {
@@ -1318,7 +1342,7 @@ static bool ctr_frame(void* data, const void* frame,
    lcd_bottom = settings->bools.video_3ds_lcd_bottom;
    if (lcd_bottom != ctr_bottom_screen_enabled)
    {
-      if (retroarch_ctl(RARCH_CTL_CORE_IS_RUNNING, NULL))
+      if (flags & RUNLOOP_FLAG_CORE_RUNNING)
       {
          ctr_set_bottom_screen_enable(lcd_bottom, false);
          if (lcd_bottom)
@@ -1399,18 +1423,19 @@ static bool ctr_frame(void* data, const void* frame,
 
    ctr->vsync_event_pending = true;
 
+#ifdef CONSOLE_LOG
    /* Internal counters/statistics
     * > This is only required if the bottom screen is enabled */
    if (ctr_bottom_screen_enabled)
    {
       frames++;
-      currentTick = svcGetSystemTick();
-      diff        = currentTick - lastTick;
-      if(diff > CTR_CPU_TICKS_PER_SECOND)
+      current_tick = svcGetSystemTick();
+      diff         = current_tick - last_tick;
+      if (diff > CTR_CPU_TICKS_PER_SECOND)
       {
-         fps = (float)frames * ((float) CTR_CPU_TICKS_PER_SECOND / (float) diff);
-         lastTick = currentTick;
-         frames = 0;
+         fps       = (float)frames * ((float) CTR_CPU_TICKS_PER_SECOND / (float) diff);
+         last_tick = current_tick;
+         frames    = 0;
       }
 
 #ifdef CTR_INSPECT_MEMORY_USAGE
@@ -1428,15 +1453,15 @@ static bool ctr_frame(void* data, const void* frame,
          svcQueryMemory(&mem_info, &page_info, query_addr);
          printf("0x%08X --> 0x%08X (0x%08X) \n", mem_info.base_addr, mem_info.base_addr + mem_info.size, mem_info.size);
          query_addr = mem_info.base_addr + mem_info.size;
-         if(query_addr == 0x1F000000)
+         if (query_addr == 0x1F000000)
             query_addr = 0x30000000;
       }
 
 #if 0
       static u32* dummy_pointer;
-      if(total_frames == 500)
+      if (total_frames == 500)
          dummy_pointer = malloc(0x2000000);
-      if(total_frames == 1000)
+      if (total_frames == 1000)
          free(dummy_pointer);
 #endif
 
@@ -1451,19 +1476,19 @@ static bool ctr_frame(void* data, const void* frame,
       printf("used: 0x%08X free: 0x%08X      \n", (u32)mem_used, app_memory - (u32)mem_used);
       static u32 stack_usage = 0;
       extern u32 __stack_bottom;
-      if(!(total_frames & 0x3F))
+      if (!(total_frames & 0x3F))
          stack_usage = ctr_get_stack_usage();
       printf("stack total:0x%08X used: 0x%08X\n", 0x10000000 - __stack_bottom, stack_usage);
 
       printf("========================================");
       ctr_linear_get_stats();
       printf("========================================");
-
 #else
       printf(PRINTFPOS(29,0)"fps: %8.4f frames: %i\r", fps, total_frames++);
 #endif
       fflush(stdout);
    }
+#endif
 
    if (ctr->should_resize)
       ctr_update_viewport(ctr, settings,
@@ -1474,22 +1499,25 @@ static bool ctr_frame(void* data, const void* frame,
             );
 
    if (ctr->refresh_bottom_menu)
-   {
-      ctrGuSetMemoryFill(true, (u32*)ctr->drawbuffers.top.left, 0x00000000,
+      ctrGuSetMemoryFill(true,
+            (u32*)ctr->drawbuffers.top.left,
+            0x00000000,
             (u32*)ctr->drawbuffers.top.left + 2 * CTR_TOP_FRAMEBUFFER_WIDTH * CTR_TOP_FRAMEBUFFER_HEIGHT,
             0x201,
-            (u32*)ctr->drawbuffers.bottom, 0x00000000,
+            (u32*)ctr->drawbuffers.bottom,
+            0x00000000,
             (u32*)ctr->drawbuffers.bottom + 2 * CTR_BOTTOM_FRAMEBUFFER_WIDTH * CTR_BOTTOM_FRAMEBUFFER_HEIGHT,
             0x201);
-   }
    else
-   {
-      ctrGuSetMemoryFill(true, (u32*)ctr->drawbuffers.top.left, 0x00000000,
+      ctrGuSetMemoryFill(true,
+            (u32*)ctr->drawbuffers.top.left,
+            0x00000000,
             (u32*)ctr->drawbuffers.top.left + 2 * CTR_TOP_FRAMEBUFFER_WIDTH * CTR_TOP_FRAMEBUFFER_HEIGHT,
-            0x201, NULL, 0x00000000,
+            0x201,
+            NULL,
+            0x00000000,
             0,
             0x201);
-   }
 
    GPUCMD_SetBufferOffset(0);
 
@@ -1498,20 +1526,20 @@ static bool ctr_frame(void* data, const void* frame,
    if (height > ctr->texture_height)
       height = ctr->texture_height;
 
-   if(frame)
+   if (frame)
    {
-      if(((((u32)(frame)) >= 0x14000000 && ((u32)(frame)) < 0x40000000)) /* frame in linear memory */
-         && !((u32)frame & 0x7F)                                         /* 128-byte aligned */
-         && !(pitch & 0xF)                                               /* 16-byte aligned */
-         && (pitch > 0x40))
+      if ( ((((u32)(frame)) >= 0x14000000 && ((u32)(frame)) < 0x40000000)) /* Frame in linear memory */
+         && !((u32)frame & 0x7F)                                           /* 128-byte aligned */
+         && !(pitch & 0xF)                                                 /* 16-byte aligned */
+         &&  (pitch > 0x40))
       {
-         /* can copy the buffer directly with the GPU */
+         /* Can copy the buffer directly with the GPU */
 #if 0
          GSPGPU_FlushDataCache(frame, pitch * height);
 #endif
-         ctrGuSetCommandList_First(true,(void*)frame, pitch * height,0,0,0,0);
-         ctrGuCopyImage(true, frame, pitch / (ctr->rgb32? 4: 2), height, ctr->rgb32 ? CTRGU_RGBA8: CTRGU_RGB565, false,
-               ctr->texture_swizzled, ctr->texture_width, ctr->rgb32 ? CTRGU_RGBA8: CTRGU_RGB565,  true);
+         ctrGuSetCommandList_First(true,(void*)frame, pitch * height, 0, 0, 0, 0);
+         ctrGuCopyImage(true, frame, pitch / (ctr->rgb32? 4: 2), height, ctr->rgb32 ? CTRGU_RGBA8 : CTRGU_RGB565, false,
+               ctr->texture_swizzled, ctr->texture_width,                ctr->rgb32 ? CTRGU_RGBA8 : CTRGU_RGB565,  true);
       }
       else
       {
@@ -1521,7 +1549,7 @@ static bool ctr_frame(void* data, const void* frame,
 
          for (i = 0; i < height; i++)
          {
-            memcpy(dst, src, width * (ctr->rgb32? 4: 2));
+            memcpy(dst, src, width    * (ctr->rgb32? 4: 2));
             dst += ctr->texture_width * (ctr->rgb32? 4: 2);
             src += pitch;
          }
@@ -1558,28 +1586,33 @@ static bool ctr_frame(void* data, const void* frame,
                     GPU_CONSTANT,
                     GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_G, 0, 0),
                     0,
-                    GPU_MODULATE, GPU_REPLACE,
+                    GPU_MODULATE,
+                    GPU_REPLACE,
                     0xFF0000FF);
       GPU_SetTexEnv(1,
                     GPU_TEVSOURCES(GPU_TEXTURE0, GPU_CONSTANT, GPU_PREVIOUS),
                     GPU_PREVIOUS,
                     GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_B, 0, 0),
                     0,
-                    GPU_MULTIPLY_ADD, GPU_REPLACE,
+                    GPU_MULTIPLY_ADD,
+                    GPU_REPLACE,
                     0x00FF00);
       GPU_SetTexEnv(2,
                     GPU_TEVSOURCES(GPU_TEXTURE0, GPU_CONSTANT, GPU_PREVIOUS),
                     GPU_PREVIOUS,
                     GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_ALPHA, 0, 0),
                     0,
-                    GPU_MULTIPLY_ADD, GPU_REPLACE,
+                    GPU_MULTIPLY_ADD,
+                    GPU_REPLACE,
                     0xFF0000);
    }
 
    GPU_SetViewport(NULL,
                    VIRT_TO_PHYS(ctr->drawbuffers.top.left),
                    0, 0, CTR_TOP_FRAMEBUFFER_HEIGHT,
-                   ctr->video_mode == CTR_VIDEO_MODE_2D_800X240 ? CTR_TOP_FRAMEBUFFER_WIDTH * 2 : CTR_TOP_FRAMEBUFFER_WIDTH);
+                   ctr->video_mode == CTR_VIDEO_MODE_2D_800X240 
+                   ? CTR_TOP_FRAMEBUFFER_WIDTH * 2 
+                   : CTR_TOP_FRAMEBUFFER_WIDTH);
 
    if (ctr->video_mode == CTR_VIDEO_MODE_3D)
    {
@@ -1620,7 +1653,7 @@ static bool ctr_frame(void* data, const void* frame,
 #ifdef HAVE_MENU
    if (ctr->menu_texture_enable)
    {
-      if(ctr->menu_texture_frame_enable)
+      if (ctr->menu_texture_frame_enable)
       {
          ctrGuSetTexture(GPU_TEXUNIT0, VIRT_TO_PHYS(ctr->menu.texture_swizzled), ctr->menu.texture_width, ctr->menu.texture_height,
                         GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR) |
@@ -1674,14 +1707,13 @@ static bool ctr_frame(void* data, const void* frame,
 #endif
 
 #ifndef CONSOLE_LOG
-   if (ctr_bottom_screen_enabled && 
-         retroarch_ctl(RARCH_CTL_CORE_IS_RUNNING, NULL))
+   if (     ctr_bottom_screen_enabled 
+         && (flags & RUNLOOP_FLAG_CORE_RUNNING))
    {
-      if ( !ctr->bottom_is_idle )
+      if (!ctr->bottom_is_idle)
       {
          ctr_render_bottom_screen(ctr);
-
-         if ( ctr->bottom_check_idle )
+         if (ctr->bottom_check_idle)
             ctr_set_bottom_screen_idle(ctr);
       }
    }
@@ -1701,20 +1733,29 @@ static bool ctr_frame(void* data, const void* frame,
                         gfxTopLeftFramebuffers[ctr->current_buffer_top], 240, CTRGU_RGB8, CTRGU_MULTISAMPLE_NONE);
 
    if ((ctr->video_mode == CTR_VIDEO_MODE_2D_400X240) || (ctr->video_mode == CTR_VIDEO_MODE_3D))
-      ctrGuDisplayTransfer(true, ctr->drawbuffers.top.right,
-                           240,
-                           400,
-                           CTRGU_RGBA8,
-                           gfxTopRightFramebuffers[ctr->current_buffer_top], 240, CTRGU_RGB8, CTRGU_MULTISAMPLE_NONE);
+      ctrGuDisplayTransfer(
+            true,
+            ctr->drawbuffers.top.right,
+            240,
+            400,
+            CTRGU_RGBA8,
+            gfxTopRightFramebuffers[ctr->current_buffer_top],
+            240,
+            CTRGU_RGB8,
+            CTRGU_MULTISAMPLE_NONE);
 
 #ifndef CONSOLE_LOG
    if (ctr->refresh_bottom_menu)
-      ctrGuDisplayTransfer(true,
-                           ctr->drawbuffers.bottom,
-                           240,
-                           320,
-                           CTRGU_RGBA8,
-                           gfxBottomFramebuffers[ctr->current_buffer_bottom], 240, CTRGU_RGB8, CTRGU_MULTISAMPLE_NONE);
+      ctrGuDisplayTransfer(
+            true,
+            ctr->drawbuffers.bottom,
+            240,
+            320,
+            CTRGU_RGBA8,
+            gfxBottomFramebuffers[ctr->current_buffer_bottom],
+            240,
+            CTRGU_RGB8,
+            CTRGU_MULTISAMPLE_NONE);
 #endif
    /* Swap buffers : */
 
@@ -1724,7 +1765,7 @@ static bool ctr_frame(void* data, const void* frame,
 
    buf0 = (u32*)gfxTopLeftFramebuffers[ctr->current_buffer_top];
 
-   if(ctr->video_mode == CTR_VIDEO_MODE_2D_800X240)
+   if (ctr->video_mode == CTR_VIDEO_MODE_2D_800X240)
    {
       buf1 = (u32*)(gfxTopLeftFramebuffers[ctr->current_buffer_top] + 240 * 3);
       stride = 240 * 3 * 2;
@@ -1763,7 +1804,7 @@ static bool ctr_frame(void* data, const void* frame,
    topFramebufferInfo.
       framebuf0_vaddr           = (u32*)gfxTopLeftFramebuffers[ctr->current_buffer_top];
 
-   if(ctr->video_mode == CTR_VIDEO_MODE_2D_800X240)
+   if (ctr->video_mode == CTR_VIDEO_MODE_2D_800X240)
    {
       topFramebufferInfo.
          framebuf1_vaddr        = (u32*)(gfxTopLeftFramebuffers[ctr->current_buffer_top] + 240 * 3);
@@ -1789,7 +1830,7 @@ static bool ctr_frame(void* data, const void* frame,
       framebuf_dispselect       = ctr->current_buffer_top;
    topFramebufferInfo.unk       = 0x00000000;
 
-   u8* framebufferInfoHeader    = gfxSharedMemory+0x200+gfxThreadID*0x80;
+   u8* framebufferInfoHeader    = gfxSharedMemory + 0x200 + gfxThreadID * 0x80;
 	GSPGPU_FramebufferInfo*
       framebufferInfo           = (GSPGPU_FramebufferInfo*)&framebufferInfoHeader[0x4];
 	framebufferInfoHeader[0x0]  ^= 1;
@@ -1816,7 +1857,7 @@ static bool ctr_frame(void* data, const void* frame,
          framebuf_dispselect       = ctr->current_buffer_bottom;
       bottomFramebufferInfo.unk    = 0x00000000;
 
-      u8* framebufferInfoHeader2   = gfxSharedMemory+0x200+gfxThreadID*0x80+0x40;
+      u8* framebufferInfoHeader2   = gfxSharedMemory + 0x200 + gfxThreadID * 0x80 + 0x40;
       GSPGPU_FramebufferInfo*
          framebufferInfo2          =
          (GSPGPU_FramebufferInfo*)&framebufferInfoHeader2[0x4];
@@ -1908,12 +1949,12 @@ static void ctr_set_texture_frame(void* data, const void* frame, bool rgb32,
                                   unsigned width, unsigned height, float alpha)
 {
    int i;
-   ctr_video_t* ctr = (ctr_video_t*)data;
-   int line_width = width;
-   (void)rgb32;
-   (void)alpha;
+   uint16_t *dst;
+   const uint16_t *src;
+   ctr_video_t *ctr = (ctr_video_t*)data;
+   int line_width   = width;
 
-   if(!ctr || !frame)
+   if (!ctr || !frame)
       return;
 
    if (line_width > ctr->menu.texture_width)
@@ -1922,8 +1963,8 @@ static void ctr_set_texture_frame(void* data, const void* frame, bool rgb32,
    if (height > (unsigned)ctr->menu.texture_height)
       height = (unsigned)ctr->menu.texture_height;
 
-   const uint16_t* src = frame;
-   uint16_t* dst = (uint16_t*)ctr->menu.texture_linear;
+   src = frame;
+   dst = (uint16_t*)ctr->menu.texture_linear;
    for (i = 0; i < height; i++)
    {
       memcpy(dst, src, line_width * sizeof(uint16_t));
@@ -1950,10 +1991,7 @@ static void ctr_set_texture_frame(void* data, const void* frame, bool rgb32,
 
 static void ctr_set_texture_enable(void* data, bool state, bool full_screen)
 {
-   (void) full_screen;
-
    ctr_video_t* ctr = (ctr_video_t*)data;
-
    if (ctr)
       ctr->menu_texture_enable = state;
 }
@@ -1965,7 +2003,7 @@ static void ctr_set_rotation(void* data, unsigned rotation)
    if (!ctr)
       return;
 
-   ctr->rotation = rotation;
+   ctr->rotation      = rotation;
    ctr->should_resize = true;
 }
 static void ctr_set_filtering(void* data, unsigned index, bool smooth, bool ctx_scaling)
@@ -1980,7 +2018,7 @@ static void ctr_set_aspect_ratio(void* data, unsigned aspect_ratio_idx)
 {
    ctr_video_t *ctr = (ctr_video_t*)data;
 
-   if(!ctr)
+   if (!ctr)
       return;
 
    ctr->keep_aspect   = true;
@@ -1993,7 +2031,6 @@ static void ctr_apply_state_changes(void* data)
 
    if (ctr)
       ctr->should_resize = true;
-
 }
 
 static void ctr_viewport_info(void* data, struct video_viewport* vp)
@@ -2062,7 +2099,7 @@ static uintptr_t ctr_load_texture(void *video_data, void *data,
       uint32_t *src = NULL;
       uint32_t *dst = NULL;
 
-      tmpdata = linearAlloc(image->width 
+      tmpdata       = linearAlloc(image->width 
             * image->height * sizeof(uint32_t));
       if (!tmpdata)
       {
@@ -2127,23 +2164,18 @@ static void ctr_overlay_tex_geom(void *data,
    ctr_video_t           *ctr = (ctr_video_t *)data;
    struct ctr_overlay_data *o = NULL;
 
-   if (ctr)
-      o = (struct ctr_overlay_data *)&ctr->overlay[image];
-
-   if (!o)
+   if (!ctr)
       return;
 
-//   printf("tex_geom[%i]: %i, %i, %.6f, %.6f\n%.6f, %.6f, ", image, o->texture.width, o->texture.height,x,y,w,h);
+   if (!(o = (struct ctr_overlay_data *)&ctr->overlay[image]))
+      return;
 
    o->frame_coords->u0 = x*o->texture.width;
    o->frame_coords->v0 = y*o->texture.height;
    o->frame_coords->u1 = w*o->texture.width;
    o->frame_coords->v1 = h*o->texture.height;
 
-//   printf("tex_geom[%i]: %i, %i, %i, %i\n", image, o->frame_coords->u0,o->frame_coords->v0,o->frame_coords->u1,o->frame_coords->v1);
-
    GSPGPU_FlushDataCache(o->frame_coords, sizeof(ctr_vertex_t));
-
 }
 
 static void ctr_overlay_vertex_geom(void *data,
@@ -2152,20 +2184,16 @@ static void ctr_overlay_vertex_geom(void *data,
    ctr_video_t           *ctr = (ctr_video_t *)data;
    struct ctr_overlay_data *o = NULL;
 
-   if (ctr)
-      o = (struct ctr_overlay_data *)&ctr->overlay[image];
-
-   if (!o)
+   if (!ctr)
       return;
 
-//   printf("vertex_geom[%i]: %.6f, %.6f, %.6f, %.6f, ", image, x,y,w,h);
+   if (!(o = (struct ctr_overlay_data *)&ctr->overlay[image]))
+      return;
 
    o->frame_coords->x0 = x * CTR_TOP_FRAMEBUFFER_WIDTH;
    o->frame_coords->y0 = y * CTR_TOP_FRAMEBUFFER_HEIGHT;
    o->frame_coords->x1 = w * (o->frame_coords->x0 + o->texture.width);
    o->frame_coords->y1 = h * (o->frame_coords->y0 + o->texture.height);
-
-//   printf("vertex_geom[%i]: %i, %i, %i, %i\n", image, o->frame_coords->x0,o->frame_coords->y0,o->frame_coords->x1,o->frame_coords->y1);
 
    GSPGPU_FlushDataCache(o->frame_coords, sizeof(ctr_vertex_t));
 }
@@ -2173,28 +2201,30 @@ static void ctr_overlay_vertex_geom(void *data,
 static bool ctr_overlay_load(void *data,
             const void *image_data, unsigned num_images)
 {
-   void* tmpdata;
-   unsigned i, j;
+   int i, j;
+   void *tmpdata;
    ctr_texture_t       *texture = NULL;
    ctr_video_t             *ctr = (ctr_video_t *)data;
    struct texture_image *images = (struct texture_image *)image_data;
 
-   ctr_free_overlay(ctr);
-
-   ctr->overlay = (struct ctr_overlay_data *)calloc(num_images, sizeof(*ctr->overlay));
-
    if (!ctr)
       return false;
 
+   ctr_free_overlay(ctr);
+
+   ctr->overlay  = (struct ctr_overlay_data *)calloc(num_images, sizeof(*ctr->overlay));
    ctr->overlays = num_images;
 
    for (i = 0; i < num_images; i++)
    {
+      ctr_scale_vector_t    *vec = NULL;
+      uint32_t              *src = NULL;
+      uint32_t              *dst = NULL;
       struct ctr_overlay_data *o = (struct ctr_overlay_data *)&ctr->overlay[i];
 
       o->frame_coords = linearAlloc(sizeof(ctr_vertex_t));
 
-      if (!ctr || !images || images[i].width > 1024 || images[i].height > 1024)
+      if (!images || images[i].width > 1024 || images[i].height > 1024)
          return 0;
 
       memset(&o->texture, 0, sizeof(ctr_texture_t));
@@ -2210,8 +2240,6 @@ static bool ctr_overlay_load(void *data,
          return 0;
       }
 
-      uint32_t *src = NULL;
-      uint32_t *dst = NULL;
 
       tmpdata = linearAlloc(images[i].width
             * images[i].height * sizeof(uint32_t));
@@ -2249,9 +2277,12 @@ static bool ctr_overlay_load(void *data,
       ctr_overlay_tex_geom(ctr, i, 0, 0, 1, 1);
       ctr_overlay_vertex_geom(ctr, i, 0, 0, 1, 1);
 
-      ctr_set_scale_vector(&o->scale_vector,
-                       CTR_TOP_FRAMEBUFFER_WIDTH, CTR_TOP_FRAMEBUFFER_HEIGHT,
-                       o->texture.width, o->texture.height);
+      vec = &o->scale_vector;
+      CTR_SET_SCALE_VECTOR(vec,
+                       CTR_TOP_FRAMEBUFFER_WIDTH,
+                       CTR_TOP_FRAMEBUFFER_HEIGHT,
+                       o->texture.width,
+                       o->texture.height);
 
       ctr->overlay[i].alpha_mod = 1.0f;
    }
@@ -2263,10 +2294,8 @@ static void ctr_overlay_enable(void *data, bool state)
 {
    ctr_video_t *ctr = (ctr_video_t *)data;
 
-   if (!ctr)
-      return;
-
-   ctr->overlay_enabled = state;
+   if (ctr)
+      ctr->overlay_enabled = state;
 }
 
 static void ctr_overlay_full_screen(void *data, bool enable)
@@ -2279,7 +2308,7 @@ static void ctr_overlay_set_alpha(void *data, unsigned image, float mod){ }
 
 static void ctr_render_overlay(void *data)
 {
-   unsigned i;
+   int i;
    ctr_video_t *ctr = (ctr_video_t*)data;
 
    for (i = 0; i < ctr->overlays; i++)
@@ -2323,10 +2352,8 @@ void ctr_overlay_interface(void *data, const video_overlay_interface_t **iface)
 {
    ctr_video_t *ctr = (ctr_video_t *)data;
 
-   if (!ctr)
-      return;
-
-   *iface = &ctr_overlay;
+   if (ctr)
+      *iface = &ctr_overlay;
 }
 #endif
 
@@ -2380,27 +2407,14 @@ static const video_poke_interface_t ctr_poke_interface = {
 static void ctr_get_poke_interface(void* data,
                                    const video_poke_interface_t** iface)
 {
-   (void)data;
    *iface = &ctr_poke_interface;
 }
 
 #ifdef HAVE_GFX_WIDGETS
-static bool ctr_gfx_widgets_enabled(void *data)
-{
-   (void)data;
-   return true;
-}
+static bool ctr_gfx_widgets_enabled(void *data) { return true; }
 #endif
-
 static bool ctr_set_shader(void* data,
-                           enum rarch_shader_type type, const char* path)
-{
-   (void)data;
-   (void)type;
-   (void)path;
-
-   return false;
-}
+      enum rarch_shader_type type, const char* path) { return false; }
 
 video_driver_t video_ctr =
 {

@@ -1248,7 +1248,8 @@ static retro_time_t rcheevos_client_prepare_ping(
    rc_api_ping_request_t api_params;
    const rcheevos_locals_t* rcheevos_locals = get_rcheevos_locals();
    const settings_t *settings               = config_get_ptr();
-   const bool cheevos_richpresence_enable   = 
+   const bool cheevos_richpresence_enable   =
+         rcheevos_hardcore_active() ||
          settings->bools.cheevos_richpresence_enable;
    char buffer[256]                         = "";
 
@@ -1508,7 +1509,7 @@ static bool rcheevos_client_fetch_badge(
    strlcpy(badge_fullpath,
          state->badge_directory, sizeof(badge_fullpath));
    fill_pathname_slash(badge_fullpath, sizeof(badge_fullpath));
-   badge_fullname      = badge_fullpath + strlen(state->badge_directory);
+   badge_fullname      = badge_fullpath + strlen(badge_fullpath);
    badge_fullname_size = sizeof(badge_fullpath) - 
       (badge_fullname - badge_fullpath);
 

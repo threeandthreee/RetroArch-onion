@@ -24,7 +24,6 @@
 #include "../common/d3d12_common.h"
 
 #include "../../configuration.h"
-#include "../../verbosity.h"
 
 typedef struct
 {
@@ -47,7 +46,6 @@ static void * d3d12_font_init(void* data, const char* font_path,
              &font->font_driver,
              &font->font_data, font_path, font_size))
    {
-      RARCH_WARN("Couldn't initialize font renderer.\n");
       free(font);
       return NULL;
    }
@@ -223,7 +221,10 @@ static void d3d12_font_render_line(
             d3d12);
 
    D3D12SetPipelineState(d3d12->queue.cmd, d3d12->sprites.pipe_font);
-   d3d12_set_texture_and_sampler(d3d12->queue.cmd, &font->texture);
+   D3D12SetGraphicsRootDescriptorTable(d3d12->queue.cmd,
+         ROOT_ID_TEXTURE_T, font->texture.gpu_descriptor[0]);
+   D3D12SetGraphicsRootDescriptorTable(d3d12->queue.cmd,
+         ROOT_ID_SAMPLER_T, font->texture.sampler);
    D3D12DrawInstanced(d3d12->queue.cmd, count, 1, d3d12->sprites.offset, 0);
 
    D3D12SetPipelineState(d3d12->queue.cmd, d3d12->sprites.pipe);
@@ -249,7 +250,7 @@ static void d3d12_font_render_message(
 
    if (!msg || !*msg)
       return;
-   if (!d3d12 || !d3d12->sprites.enabled)
+   if (!d3d12 || (!(d3d12->flags & D3D12_ST_FLAG_SPRITES_ENABLE)))
       return;
 
    /* If font line metrics are not supported just draw as usual */

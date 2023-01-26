@@ -164,6 +164,30 @@ static void menu_action_setting_disp_set_label_remap_file_info(
    strlcpy(s2, path, len2);
 }
 
+static void menu_action_setting_disp_set_label_override_file_info(
+      file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *path,
+      char *s2, size_t len2)
+{
+   const char *override_path   = path_get(RARCH_PATH_CONFIG_OVERRIDE);
+   const char *override_file   = NULL;
+
+   *w = 19;
+
+   if (!string_is_empty(override_path))
+      override_file = path_basename_nocompression(override_path);
+
+   if (!string_is_empty(override_file))
+      strlcpy(s, override_file, len);
+   else
+      strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NOT_AVAILABLE), len);
+
+   strlcpy(s2, path, len2);
+}
+
 static void menu_action_setting_disp_set_label_configurations(
       file_list_t* list,
       unsigned *w, unsigned type, unsigned i,
@@ -1377,18 +1401,6 @@ static void menu_action_setting_disp_set_label_menu_file_rdb(
          path, "(RDB)", STRLEN_CONST("(RDB)"), s2, len2);
 }
 
-static void menu_action_setting_disp_set_label_menu_file_cursor(
-      file_list_t* list,
-      unsigned *w, unsigned type, unsigned i,
-      const char *label,
-      char *s, size_t len,
-      const char *path,
-      char *s2, size_t len2)
-{
-   MENU_ACTION_SETTING_GENERIC_DISP_SET_LABEL_2(w, s, len,
-         path, "(CURSOR)", STRLEN_CONST("(CURSOR)"), s2, len2);
-}
-
 static void menu_action_setting_disp_set_label_menu_file_cheat(
       file_list_t* list,
       unsigned *w, unsigned type, unsigned i,
@@ -1890,6 +1902,10 @@ static int menu_cbs_init_bind_get_string_representation_compare_label(
             BIND_ACTION_GET_VALUE(cbs,
                   menu_action_setting_disp_set_label_remap_file_info);
             break;
+         case MENU_ENUM_LABEL_OVERRIDE_FILE_INFO:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_override_file_info);
+            break;
          case MENU_ENUM_LABEL_VIDEO_SHADER_FILTER_PASS:
 #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
             BIND_ACTION_GET_VALUE(cbs,
@@ -2204,10 +2220,6 @@ static int menu_cbs_init_bind_get_string_representation_compare_type(
       case FILE_TYPE_RDB:
          BIND_ACTION_GET_VALUE(cbs,
                menu_action_setting_disp_set_label_menu_file_rdb);
-         break;
-      case FILE_TYPE_CURSOR:
-         BIND_ACTION_GET_VALUE(cbs,
-               menu_action_setting_disp_set_label_menu_file_cursor);
          break;
       case FILE_TYPE_CHEAT:
          BIND_ACTION_GET_VALUE(cbs,

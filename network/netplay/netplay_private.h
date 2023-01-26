@@ -2,7 +2,6 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2016-2017 - Gregor Richards
- *  Copyright (C) 2021-2022 - Roberto V. Rampim
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -38,6 +37,11 @@
 
 #define NETPLAY_PASS_LEN      128
 #define NETPLAY_PASS_HASH_LEN 64 /* length of a SHA-256 hash */
+
+#define NETPLAY_ANNOUNCE_AFTER 5000000
+#define NETPLAY_PING_AFTER     3000000
+#define NETPLAY_ANNOUNCE_TIME  20000000
+#define NETPLAY_PING_TIME      3000000
 
 #define MAX_SERVER_STALL_TIME_USEC (5*1000*1000)
 #define MAX_CLIENT_STALL_TIME_USEC (10*1000*1000)
@@ -335,6 +339,18 @@ typedef struct netplay_address
    uint8_t addr[16];
 } netplay_address_t;
 
+enum netplay_connection_flags
+{
+   /* Is this connection buffer in use? */
+   NETPLAY_CONN_FLAG_ACTIVE         = (1 << 0),
+   /* Is this player paused? */
+   NETPLAY_CONN_FLAG_PAUSED         = (1 << 1),
+   /* Is this connection allowed to play (server only)? */
+   NETPLAY_CONN_FLAG_CAN_PLAY       = (1 << 2),
+   /* Did we request a ping response? */
+   NETPLAY_CONN_FLAG_PING_REQUESTED = (1 << 3)
+};
+
 /* Each connection gets a connection struct */
 struct netplay_connection
 {
@@ -387,20 +403,10 @@ struct netplay_connection
    /* Is this connection stalling? */
    enum rarch_netplay_stall_reason stall;
 
+   uint8_t flags;
+
    /* Nickname of peer */
    char nick[NETPLAY_NICK_LEN];
-
-   /* Is this connection buffer in use? */
-   bool active;
-
-   /* Is this player paused? */
-   bool paused;
-
-   /* Is this connection allowed to play (server only)? */
-   bool can_play;
-
-   /* Did we request a ping response? */
-   bool ping_requested;
 };
 
 /* Compression transcoder */
@@ -470,6 +476,9 @@ struct netplay
    retro_time_t catch_up_time;
    /* How long have we been stalled? */
    retro_time_t stall_time;
+
+   retro_time_t next_announce;
+   retro_time_t next_ping;
 
    struct retro_callbacks cbs;
 
@@ -588,10 +597,6 @@ struct netplay
    /* Latency frames; positive to hide network latency, 
     * negative to hide input latency */
    int input_latency_frames;
-
-   int reannounce;
-
-   int reping;
 
    /* Our mode and status */
    enum rarch_netplay_connection_mode self_mode;

@@ -61,6 +61,7 @@
 #include "list_special.h"
 #include "paths.h"
 #include "retroarch.h"
+#include "runloop.h"
 #include "verbosity.h"
 #include "version.h"
 #include "version_git.h"
@@ -652,7 +653,7 @@ bool command_read_ram(command_t *cmd, const char *arg)
    unsigned int nbytes          = 0;
    unsigned int alloc_size      = 0;
    unsigned int addr            = -1;
-   unsigned int len             = 0;
+   size_t len                   = 0;
 
    if (sscanf(arg, "%x %u", &addr, &nbytes) != 2)
       return true;
@@ -786,7 +787,7 @@ uint8_t *command_memory_get_pointer(
          strlcpy(reply_at, " -1 descriptor data is readonly\n", len);
       else
       {
-         *max_bytes = (desc->core.len - offset);
+         *max_bytes = (unsigned int)(desc->core.len - offset);
          return (uint8_t*)desc->core.ptr + desc->core.offset + offset;
       }
    }
@@ -797,35 +798,35 @@ uint8_t *command_memory_get_pointer(
 
 bool command_get_status(command_t *cmd, const char* arg)
 {
-   char reply[4096]            = {0};
-   bool contentless            = false;
-   bool is_inited              = false;
-   runloop_state_t *runloop_st = runloop_state_get_ptr();
+   char reply[4096];
+   uint8_t flags                  = content_get_flags();
 
-   content_get_status(&contentless, &is_inited);
-
-   if (!is_inited)
-       strlcpy(reply, "GET_STATUS CONTENTLESS", sizeof(reply));
-   else
+   if (flags & CONTENT_ST_FLAG_IS_INITED)
    {
-       /* add some content info */
-       const char *status       = "PLAYING";
-       const char *content_name = path_basename(path_get(RARCH_PATH_BASENAME));  /* filename only without ext */
-       int content_crc32        = content_get_crc();
-       const char* system_id    = NULL;
-       core_info_t *core_info   = NULL;
+      /* add some content info */
+      runloop_state_t *runloop_st = runloop_state_get_ptr();
+      const char *status          = "PLAYING";
+      const char *content_name    = path_basename(path_get(RARCH_PATH_BASENAME));  /* filename only without ext */
+      int content_crc32           = content_get_crc();
+      const char* system_id       = NULL;
+      core_info_t *core_info      = NULL;
 
-       core_info_get_current_core(&core_info);
+      reply[0]                    = '\0';
 
-       if (runloop_st->paused)
-          status                = "PAUSED";
-       if (core_info)
-          system_id             = core_info->system_id;
-       if (!system_id)
-          system_id             = runloop_st->system.info.library_name;
+      core_info_get_current_core(&core_info);
 
-       snprintf(reply, sizeof(reply), "GET_STATUS %s %s,%s,crc32=%x\n", status, system_id, content_name, content_crc32);
+      if (runloop_st->flags & RUNLOOP_FLAG_PAUSED)
+         status                   = "PAUSED";
+      if (core_info)
+         system_id                = core_info->system_id;
+      if (!system_id)
+         system_id                = runloop_st->system.info.library_name;
+
+      snprintf(reply, sizeof(reply), "GET_STATUS %s %s,%s,crc32=%x\n",
+            status, system_id, content_name, content_crc32);
    }
+   else
+       strlcpy(reply, "GET_STATUS CONTENTLESS", sizeof(reply));
 
    cmd->replier(cmd, reply, strlen(reply));
 
@@ -1061,6 +1062,9 @@ bool command_event_save_config(
       return true;
    }
 
+   if (runloop_get_flags() & RUNLOOP_FLAG_OVERRIDES_ACTIVE)
+      return false;
+
    if (!string_is_empty(str))
    {
       snprintf(s, len, "%s \"%s\".",
@@ -1129,7 +1133,7 @@ bool command_event_resize_windowed_scale(settings_t *settings,
    if (window_scale == 0)
       return false;
 
-   configuration_set_float(settings, settings->floats.video_scale, (float)window_scale);
+   configuration_set_uint(settings, settings->uints.video_scale, window_scale);
 
    if (!video_fullscreen)
       command_event(CMD_EVENT_REINIT, NULL);
@@ -1156,10 +1160,6 @@ bool command_event_save_auto_state(
       return false;
    if (string_is_empty(path_basename(path_get(RARCH_PATH_BASENAME))))
       return false;
-#ifdef HAVE_CHEEVOS
-   if (rcheevos_hardcore_active())
-      return false;
-#endif
 
    strlcpy(savestate_name_auto,
          runloop_st->name.savestate,
@@ -1193,9 +1193,7 @@ void command_event_init_cheats(
    bool allow_cheats             = true;
 #endif
 #ifdef HAVE_BSV_MOVIE
-   bsv_movie_t *
-	  bsv_movie_state_handle      = (bsv_movie_t*)bsv_movie_data;
-   allow_cheats                 &= !(bsv_movie_state_handle != NULL);
+   allow_cheats                 &= !(bsv_movie_data != NULL);
 #endif
 
    if (!allow_cheats)
@@ -1209,7 +1207,7 @@ void command_event_init_cheats(
 }
 #endif
 
-bool command_event_load_entry_state(void)
+bool command_event_load_entry_state(settings_t *settings)
 {
    char entry_state_path[PATH_MAX_LENGTH];
    int entry_path_stats;
@@ -1230,7 +1228,7 @@ bool command_event_load_entry_state(void)
 
    entry_state_path[0] = '\0';
 
-   if (!retroarch_get_entry_state_path(
+   if (!runloop_get_entry_state_path(
             entry_state_path, sizeof(entry_state_path),
             runloop_st->entry_state_slot))
       return false;
@@ -1250,6 +1248,9 @@ bool command_event_load_entry_state(void)
          msg_hash_to_str(MSG_LOADING_ENTRY_STATE_FROM),
          entry_state_path, ret ? "succeeded" : "failed"
          );
+
+   if (ret)
+   configuration_set_int(settings, settings->ints.state_slot, runloop_st->entry_state_slot);
 
    return ret;
 }
@@ -1456,11 +1457,11 @@ bool command_set_shader(command_t *cmd, const char *arg)
          char abs_arg[PATH_MAX_LENGTH];
          const char *ref_path = settings->paths.directory_video_shader;
          fill_pathname_join_special(abs_arg, ref_path, arg, sizeof(abs_arg));
-         return apply_shader(settings, type, abs_arg, true);
+         return video_shader_apply_shader(settings, type, abs_arg, true);
       }
    }
 
-   return apply_shader(settings, type, arg, true);
+   return video_shader_apply_shader(settings, type, arg, true);
 }
 #endif
 
@@ -1533,13 +1534,13 @@ bool command_event_save_core_config(
             sizeof(config_path));
    }
 
-   if (runloop_st->overrides_active)
+   if (runloop_st->flags & RUNLOOP_FLAG_OVERRIDES_ACTIVE)
    {
       /* Overrides block config file saving,
        * make it appear as overrides weren't enabled
        * for a manual save. */
-      runloop_st->overrides_active      = false;
-      overrides_active                  = true;
+      runloop_st->flags &= ~RUNLOOP_FLAG_OVERRIDES_ACTIVE;
+      overrides_active   = true;
    }
 
 #ifdef HAVE_CONFIGFILE
@@ -1550,7 +1551,10 @@ bool command_event_save_core_config(
       runloop_msg_queue_push(msg, 1, 180, true, NULL,
             MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
 
-   runloop_st->overrides_active = overrides_active;
+   if (overrides_active)
+      runloop_st->flags |=  RUNLOOP_FLAG_OVERRIDES_ACTIVE;
+   else
+      runloop_st->flags &= ~RUNLOOP_FLAG_OVERRIDES_ACTIVE;
 
    return true;
 }
@@ -1561,18 +1565,20 @@ void command_event_save_current_config(enum override_type type)
 
    switch (type)
    {
+      default:
       case OVERRIDE_NONE:
          {
+            char msg[256];
+
+            msg[0] = '\0';
+
             if (path_is_empty(RARCH_PATH_CONFIG))
             {
-               char msg[128];
                strlcpy(msg, "[Config]: Config directory not set, cannot save configuration.", sizeof(msg));
                runloop_msg_queue_push(msg, 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
             }
             else
             {
-               char msg[256];
-               msg[0] = '\0';
                command_event_save_config(path_get(RARCH_PATH_CONFIG), msg, sizeof(msg));
                runloop_msg_queue_push(msg, 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
             }
@@ -1582,18 +1588,77 @@ void command_event_save_current_config(enum override_type type)
       case OVERRIDE_CORE:
       case OVERRIDE_CONTENT_DIR:
          {
-            char msg[128];
-            if (config_save_overrides(type, &runloop_st->system))
+            int8_t ret = config_save_overrides(type, &runloop_st->system, false);
+            char msg[256];
+
+            msg[0] = '\0';
+
+            switch (ret)
             {
-               strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_SAVED_SUCCESSFULLY), sizeof(msg));
-               /* set overrides to active so the original config can be
-                  restored after closing content */
-               runloop_st->overrides_active = true;
+               case 1:
+                  strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_SAVED_SUCCESSFULLY), sizeof(msg));
+                  /* set overrides to active so the original config can be
+                     restored after closing content */
+                  runloop_st->flags |= RUNLOOP_FLAG_OVERRIDES_ACTIVE;
+                  break;
+               case -1:
+                  strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_NOT_SAVED), sizeof(msg));
+                  break;
+               default:
+               case 0:
+                  strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_ERROR_SAVING), sizeof(msg));
+                  break;
             }
-            else
-               strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_ERROR_SAVING), sizeof(msg));
+
             RARCH_LOG("[Overrides]: %s\n", msg);
             runloop_msg_queue_push(msg, 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+
+#ifdef HAVE_MENU
+            {
+               bool refresh = false;
+
+               menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
+               menu_driver_ctl(RARCH_MENU_CTL_SET_PREVENT_POPULATE, NULL);
+            }
+#endif
+         }
+         break;
+   }
+}
+
+void command_event_remove_current_config(enum override_type type)
+{
+   runloop_state_t *runloop_st     = runloop_state_get_ptr();
+
+   switch (type)
+   {
+      default:
+      case OVERRIDE_NONE:
+         break;
+      case OVERRIDE_GAME:
+      case OVERRIDE_CORE:
+      case OVERRIDE_CONTENT_DIR:
+         {
+            char msg[256];
+
+            msg[0] = '\0';
+
+            if (config_save_overrides(type, &runloop_st->system, true))
+               strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_REMOVED_SUCCESSFULLY), sizeof(msg));
+            else
+               strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_ERROR_REMOVING), sizeof(msg));
+
+            RARCH_LOG("[Overrides]: %s\n", msg);
+            runloop_msg_queue_push(msg, 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+
+#ifdef HAVE_MENU
+            {
+               bool refresh = false;
+
+               menu_entries_ctl(MENU_ENTRIES_CTL_SET_REFRESH, &refresh);
+               menu_driver_ctl(RARCH_MENU_CTL_SET_PREVENT_POPULATE, NULL);
+            }
+#endif
          }
          break;
    }
@@ -1614,7 +1679,7 @@ bool command_event_main_state(unsigned cmd)
 
    if (savestates_enabled)
    {
-      retroarch_get_current_savestate_path(state_path,
+      runloop_get_current_savestate_path(state_path,
             sizeof(state_path));
 
       core_serialize_size(&info);
@@ -1724,7 +1789,7 @@ bool command_event_disk_control_append_image(
       return false;
 
 #ifdef HAVE_THREADS
-   if (runloop_st->use_sram)
+   if (runloop_st->flags & RUNLOOP_FLAG_USE_SRAM)
       autosave_deinit();
 #endif
 
@@ -1780,10 +1845,10 @@ void command_event_reinit(const int flags)
    command_event(CMD_EVENT_GAME_FOCUS_TOGGLE, &game_focus_cmd);
 
 #ifdef HAVE_MENU
-   p_disp->framebuf_dirty = true;
+   p_disp->flags |= GFX_DISP_FLAG_FB_DIRTY;
    if (video_fullscreen)
       video_driver_hide_mouse();
-   if (     menu_st->alive 
+   if (     (menu_st->flags & MENU_ST_FLAG_ALIVE)
          && video_st->current_video->set_nonblock_state)
       video_st->current_video->set_nonblock_state(
             video_st->data, false,

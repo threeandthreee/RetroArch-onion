@@ -153,6 +153,8 @@ fi
 }
 
 add_define MAKEFILE ASSETS_DIR "${ASSETS_DIR:-$SHARE_DIR}/retroarch"
+add_define MAKEFILE FILTERS_DIR "${FILTERS_DIR:-$SHARE_DIR}/retroarch"
+add_define MAKEFILE CORE_INFO_DIR "${CORE_INFO_DIR:-$SHARE_DIR}/retroarch"
 add_define MAKEFILE BIN_DIR "${BIN_DIR:-${PREFIX}/bin}"
 add_define MAKEFILE DOC_DIR "${DOC_DIR:-${SHARE_DIR}/doc/retroarch}"
 add_define MAKEFILE MAN_DIR "${MAN_DIR:-${SHARE_DIR}/man}"
@@ -638,8 +640,6 @@ if [ "$HAVE_GLSLANG" != no ]; then
    check_lib cxx GLSLANG_SPIRV_TOOLS -lSPIRV-Tools
 
    if [ "$HAVE_GLSLANG" = no ] ||
-      [ "$HAVE_GLSLANG_OSDEPENDENT" = no ] ||
-      [ "$HAVE_GLSLANG_OGLCOMPILER" = no ] ||
       [ "$HAVE_GLSLANG_HLSL" = no ] ||
       [ "$HAVE_GLSLANG_SPIRV" = no ] ||
       [ "$HAVE_GLSLANG_SPIRV_TOOLS_OPT" = no ] ||
