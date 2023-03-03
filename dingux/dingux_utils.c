@@ -381,6 +381,7 @@ int dingux_get_battery_level(void)
     
     /* Check whether file exists */
     if (path_is_valid("/customer/app/axp_test")){
+        /* It is a Miyoo Mini Plus */
         char *cmd = "cd /customer/app/ ; ./axp_test";  
         int batJsonSize = 100;
         char buf[batJsonSize];
