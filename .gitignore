@@ -20,6 +20,7 @@ config.log
 /.project
 /.externalToolBuilders/
 /retroarch
+/retroarch_miyoo354
 /retroarch.cfg
 /retroarch.exe
 /retroarch_debug.exe

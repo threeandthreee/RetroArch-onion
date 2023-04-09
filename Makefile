@@ -24,7 +24,9 @@ STRIP_BIN	= 1
 #########################
 #########################
 
+ifeq ($(PACKAGE_NAME),)
 PACKAGE_NAME = retroarch
+endif
 
 DEBUG ?= 0
 
@@ -103,15 +105,17 @@ HAVE_NEON = 1
 HAVE_OSS = 1
 HAVE_AUDIOIO = 1
 
-#Required for achievements
+ifeq ($(ADD_NETWORKING),1)
+#Required for network features
 HAVE_NETWORKING = 1
 HAVE_GETADDRINFO = 1
 HAVE_IFINFO = 1
 HAVE_NETPLAYDISCOVERY = 1
 HAVE_CHEEVOS = 1
+endif
 
 OS = Linux
-TARGET = retroarch
+TARGET = $(PACKAGE_NAME)
 
 OBJ :=
 LINK := $(CXX)
