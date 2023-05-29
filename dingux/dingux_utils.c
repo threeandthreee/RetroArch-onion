@@ -23,8 +23,11 @@
 #include <lists/dir_list.h>
 #endif
 #if defined(MIYOOMINI)
-#include "sys/ioctl.h"
+#include <unistd.h>
 #include <fcntl.h>
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
 #endif
 #include <stdlib.h>
 
@@ -377,25 +380,41 @@ int dingux_get_battery_level(void)
 
    return (int)(((voltage_now - voltage_min) * 100) / (voltage_max - voltage_min));
 #elif defined(MIYOOMINI)
-    int percBat = 0;
-    
-    /* Check whether file exists */
-    if (path_is_valid("/customer/app/axp_test")){
-        /* It is a Miyoo Mini Plus */
-        char *cmd = "cd /customer/app/ ; ./axp_test";  
-        int batJsonSize = 100;
-        char buf[batJsonSize];
-        int battery_number;
+   // for miyoomini plus
+#define AXPDEV "/dev/i2c-1"
+#define AXPID (0x34)
+   static uint32_t mmplus = 2;
 
-        FILE *fp;      
-        fp = popen(cmd, "r");
-            if (fgets(buf, batJsonSize, fp) != NULL) {
-               sscanf(buf,  "{\"battery\":%d, \"voltage\":%*d, \"charging\":%*d}", &percBat);
-            }
-        pclose(fp);   
-    } 
-    else {
-       //It is a Miyoo mini
+   if (mmplus) {
+      int axp_fd = open(AXPDEV, O_RDWR);
+      if (axp_fd >= 0) {
+         struct i2c_msg msg[2];
+         struct i2c_rdwr_ioctl_data packets;
+         unsigned char address = 0xB9;
+         unsigned char val;
+         if (mmplus == 2) {
+            ioctl(axp_fd, I2C_TIMEOUT, 5);
+            ioctl(axp_fd, I2C_RETRIES, 1);
+            mmplus = 1;
+         }
+         msg[0].addr = AXPID;
+         msg[0].flags = 0;
+         msg[0].len = 1;
+         msg[0].buf = &address;
+         msg[1].addr = AXPID;
+         msg[1].flags = I2C_M_RD;
+         msg[1].len = 1;
+         msg[1].buf = &val;
+         packets.nmsgs = 2;
+         packets.msgs = &msg[0];
+         int ret = ioctl(axp_fd, I2C_RDWR, &packets);
+         close(axp_fd);
+         if (ret < 0) mmplus = 0; else return (val & 0x7f);
+      }
+   }
+   {
+      // for miyoomini
+       int percBat = 0;
        typedef struct {
           int channel_value;
           int adc_value;
