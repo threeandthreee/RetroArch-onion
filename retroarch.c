@@ -2092,16 +2092,16 @@ static inline void show_miyoo_fullscreen_notification(settings_t* settings){
 
    msg[0] = '\0';
 
-   snprintf(msg, sizeof(msg), "Aspect Ratio: %s. Integer Scale: %s.",
-      settings->bools.video_dingux_ipu_keep_aspect ? "original" : "4:3",
-      settings->bools.video_scale_integer ? "on" : "off");
+   snprintf(msg, sizeof(msg), "Aspect: %s. %s.",
+      settings->bools.video_dingux_ipu_keep_aspect ? "Original" : "4:3",
+      settings->bools.video_scale_integer ? "1x Scale" : "Screen Fill");
 
    msg_obj.msg      = msg;
    msg_obj.duration = 1000;
    msg_obj.priority = 3;
    msg_obj.level    = RETRO_LOG_INFO;
    msg_obj.target   = RETRO_MESSAGE_TARGET_ALL;
-   msg_obj.type     = RETRO_MESSAGE_TYPE_NOTIFICATION_ALT;
+   msg_obj.type     = RETRO_MESSAGE_TYPE_STATUS;
    msg_obj.progress = -1;
 
    runloop_environment_cb(RETRO_ENVIRONMENT_SET_MESSAGE_EXT, &msg_obj);
