@@ -120,6 +120,7 @@ OS = Linux
 TARGET = $(PACKAGE_NAME)
 
 OBJ :=
+OBJ += miyoo.o
 LINK := $(CXX)
 DEF_FLAGS := -marm -mtune=cortex-a7 -march=armv7ve+simd -mfpu=neon-vfpv4 -mfloat-abi=hard -ffast-math -fomit-frame-pointer
 DEF_FLAGS += -ffunction-sections -fdata-sections
@@ -127,7 +128,7 @@ DEF_FLAGS += -I. -Ideps -Ideps/stb -DMIYOOMINI -DDINGUX -MMD
 DEF_FLAGS += -Wall -Wno-unused-function -Wno-unused-variable $(LTO)
 DEF_FLAGS += -std=gnu99 -D_GNU_SOURCE
 LIBS := -ldl -lz -lrt -pthread -lmi_sys -lmi_gfx -lmi_ao -lmi_common
-CFLAGS := 
+CFLAGS :=
 CXXFLAGS := -fno-exceptions -fno-rtti -std=c++11 -D__STDC_CONSTANT_MACROS
 ASFLAGS :=
 LDFLAGS := -Wl,--gc-sections -s
