@@ -28,6 +28,10 @@ static void show_miyoo_fullscreen_notification(settings_t* settings){
 }
 
 static void write_core_override_aspect_scale(settings_t* settings){
+   // Saves the Aspect and Scaling settings to the core override file
+   // It will use an existing file if it exists, otherwise a new one will be created
+   // This logic is modified from `configuration.c::config_save_overrides()`.
+
    char override_path[PATH_MAX_LENGTH] = {0};
    char config_directory[PATH_MAX_LENGTH] = {0};
    config_file_t* conf = NULL;
