@@ -30,6 +30,7 @@
 
 #include "gfx.c"
 #include "scaler_neon.c"
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
@@ -540,6 +541,23 @@ static void sdl_miyoomini_set_cpugovernor(enum cpugov gov) {
    if (fp) { fwrite(govstr[gov], 1, strlen(govstr[gov]), fp); fclose(fp); }
 }
 
+static void sdl_miyoomini_toggle_powersave(bool state) {
+   sdl_miyoomini_set_cpugovernor(state ? POWERSAVE : PERFORMANCE);
+}
+
+static void sdl_miyoomini_sighandler(int sig) {
+   switch (sig) {
+   case SIGSTOP:
+      sdl_miyoomini_toggle_powersave(true);
+      break;
+   case SIGCONT:
+      sdl_miyoomini_toggle_powersave(false);
+      break;
+   default:
+      break;
+   }
+}
+
 static void sdl_miyoomini_init_font_color(sdl_miyoomini_video_t *vid) {
    settings_t *settings = config_get_ptr();
    uint32_t red         = 0xFF;
@@ -591,6 +609,9 @@ static void sdl_miyoomini_input_driver_init(
    /* If input driver name is empty, cannot
     * initialise anything... */
    if (string_is_empty(input_drv_name)) return;
+
+   signal(SIGSTOP, sdl_miyoomini_sighandler);
+   signal(SIGCONT, sdl_miyoomini_sighandler);
 
    if (string_is_equal(input_drv_name, "sdl_dingux")) {
       *input_data = input_driver_init_wrap(&input_sdl_dingux,
@@ -869,10 +890,15 @@ static void sdl_miyoomini_set_texture_enable(void *data, bool state, bool full_s
    if (state == vid->menu_active) return;
    vid->menu_active = state;
 
+   sdl_miyoomini_toggle_powersave(state);
+
    if (state) {
-      sdl_miyoomini_set_cpugovernor(POWERSAVE);
+      system("playActivity stop_all &");
       vid->was_in_menu = true;
-   } else sdl_miyoomini_set_cpugovernor(PERFORMANCE);
+   }
+   else {
+      system("playActivity resume &");
+   }
 }
 
 static void sdl_miyoomini_set_texture_frame(void *data, const void *frame, bool rgb32,
