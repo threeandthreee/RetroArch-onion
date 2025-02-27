@@ -1,6 +1,7 @@
 name: CI Miyoo ARM32
 
 on:
+  workflow_dispatch:
   push:
   pull_request:
   repository_dispatch:
